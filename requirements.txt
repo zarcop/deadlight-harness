@@ -1,0 +1,31 @@
+# Edge Naval AI Sandbox Policy Harness -- runtime dependencies.
+#
+# Every version below is the one this harness was built and verified against on
+# Python 3.11 / macOS arm64. Lower bounds are floors, not aspirations: the upper
+# bounds keep a deployed node from drifting onto an untested major release,
+# which matters more than usual here because the node cannot be patched at sea.
+#
+# Install:      pip install -r requirements.txt
+# Stage model:  python edge_embedding.py --stage      (needs network, run once)
+#
+# There is deliberately no torch and no transformers: fastembed drives ONNX
+# Runtime directly, which is what keeps the image small enough for an edge node.
+
+# Schema and validation -- tactical_telemetry.py
+pydantic>=2.6,<3.0
+
+# Numerics -- every module
+numpy>=1.26,<3.0
+
+# Embedding engine (pulls onnxruntime, tokenizers, huggingface-hub) -- edge_embedding.py
+fastembed>=0.8,<0.9
+
+# Vector store -- policy_engine.py
+faiss-cpu>=1.8,<2.0
+
+# PCA projection -- latent_projector.py
+scikit-learn>=1.4,<2.0
+
+# Convex hull for the UI envelope mesh -- latent_projector.py
+# Arrives with scikit-learn, but declared because the code imports it directly.
+scipy>=1.11,<2.0

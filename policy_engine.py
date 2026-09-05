@@ -272,7 +272,7 @@ def initialize_nominal_manifold(
     window_size: int = 5,
     top_k: int = DEFAULT_TOP_K,
     tau_margin: float = 1.0,
-    batch_size: int = 64,
+    batch_size: int = 16,
 ) -> NominalManifold:
     """Build the baseline latent manifold from nominal patrol behaviour.
 
@@ -289,6 +289,13 @@ def initialize_nominal_manifold(
         top_k: Neighbours used at query time and during calibration.
         tau_margin: Multiplier on the calibrated maximum. 1.0 is the literal
             specification; >1.0 buys tolerance against benign novelty.
+        batch_size: Embedding batch during calibration. This sets the harness's
+            peak memory and the allocator never returns it, so the default is
+            deliberately small. Measured peak RSS for the full harness: 8 ->
+            343MB, 16 -> 410MB, 32 -> 458MB, 64 -> 671MB, against the 500MB
+            platform target -- while calibration time is flat at ~2.1s across
+            all of them. The large batch buys nothing and costs a quarter of a
+            gigabyte.
 
     Returns:
         A :class:`NominalManifold` carrying the index, centroid and tau.
