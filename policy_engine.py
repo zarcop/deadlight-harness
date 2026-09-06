@@ -59,6 +59,7 @@ __all__ = [
     "Verdict",
     "DEFAULT_TRIPWIRES",
     "initialize_nominal_manifold",
+    "build_manifold_from_windows",
 ]
 
 LOGGER = logging.getLogger("policy_engine")
@@ -325,7 +326,37 @@ def initialize_nominal_manifold(
         window.append(event)
         texts.append(window.to_semantic_representation())
 
-    matrix = _as_matrix(embedder.vectorize_batch(texts, batch_size=batch_size))
+    return build_manifold_from_windows(
+        embedder, texts, top_k=top_k, tau_margin=tau_margin, batch_size=batch_size
+    )
+
+
+def build_manifold_from_windows(
+    embedder: EdgeEmbedder,
+    windows: Sequence[str],
+    *,
+    top_k: int = DEFAULT_TOP_K,
+    tau_margin: float = 1.0,
+    batch_size: int = 16,
+) -> NominalManifold:
+    """Calibrate a manifold from pre-rendered nominal window strings.
+
+    :func:`initialize_nominal_manifold` sources its windows from the scripted
+    telemetry generator, which is right when the harness watches that generator.
+    It is wrong when the telemetry comes from somewhere else -- an agent driving
+    real actuation produces a different distribution of speeds, courses and
+    deviations, and a manifold calibrated on the generator will read almost all
+    of it as anomalous no matter how safe it is.
+
+    Calibrate on windows drawn from the same source the harness will judge.
+    """
+    import faiss
+
+    if len(windows) < top_k + 1:
+        raise ValueError(f"need more than {top_k} windows to calibrate; got {len(windows)}")
+
+    start_ns = time.perf_counter_ns()
+    matrix = _as_matrix(embedder.vectorize_batch(list(windows), batch_size=batch_size))
     dimension = matrix.shape[1]
 
     index = faiss.IndexFlatIP(dimension)
