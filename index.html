@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sentinel Edge Harness | DDIL Agent Safety Sandbox</title>
+    <meta
+      name="description"
+      content="A local DDIL safety sandbox that intercepts autonomous agent commands, applies policy and anomaly checks, and logs containment decisions."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">SE</div>
+        <div>
+          <p>Sentinel Edge Harness</p>
+          <h1>DDIL Agent Safety Sandbox</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <label class="uplink-toggle">
+          <input id="uplinkToggle" type="checkbox" checked />
+          <span>Uplink Online</span>
+        </label>
+        <button class="secondary-button" id="exportJsonlBtn" type="button">Export JSONL</button>
+        <button class="secondary-button" id="exportCsvBtn" type="button">Export CSV</button>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="hero-band">
+        <div>
+          <p class="eyebrow">Local Guardrail</p>
+          <h2>Intercept, score, and contain autonomous commands at the edge.</h2>
+        </div>
+        <div class="hero-status" id="modeCard">
+          <span class="status-light online" id="modeLight"></span>
+          <div>
+            <strong id="modeLabel">Cloud-assisted monitoring</strong>
+            <span id="modeCopy">Normal thresholds with uplink available.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="control-strip" aria-label="Simulation controls">
+        <div class="control-group">
+          <button class="primary-button" id="startBtn" type="button">Start Loop</button>
+          <button class="secondary-button" id="stepBtn" type="button">Single Step</button>
+          <button class="secondary-button" id="pauseBtn" type="button">Pause</button>
+          <button class="danger-button" id="rogueBtn" type="button">Inject Rogue Command</button>
+          <button class="secondary-button" id="resetBtn" type="button">Reset</button>
+        </div>
+        <label class="select-control">
+          Agent mode
+          <select id="agentMode">
+            <option value="normal">Normal navigation</option>
+            <option value="degraded">Degraded sensors</option>
+            <option value="cautious">Cautious operator</option>
+            <option value="stress">Stress test</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="metrics-grid" aria-label="Harness metrics">
+        <article class="metric-card">
+          <span>Verdict</span>
+          <strong id="verdictMetric">Approved</strong>
+          <p id="verdictReason">System initialized with safe baseline.</p>
+        </article>
+        <article class="metric-card">
+          <span>Anomaly score</span>
+          <strong id="scoreMetric">0.00</strong>
+          <p id="scoreReason">Distance from safe command cluster.</p>
+        </article>
+        <article class="metric-card">
+          <span>Contained</span>
+          <strong id="containedMetric">0</strong>
+          <p>Commands blocked by local policy or anomaly checks.</p>
+        </article>
+        <article class="metric-card">
+          <span>Event log</span>
+          <strong id="eventMetric">0</strong>
+          <p>Auditable telemetry-command decisions captured locally.</p>
+        </article>
+      </section>
+
+      <section class="main-grid">
+        <article class="panel map-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Operational View</p>
+              <h2>Navigation Sandbox</h2>
+            </div>
+            <span class="pill" id="simTick">Tick 0</span>
+          </div>
+          <div class="nav-map" id="navMap" aria-label="Synthetic navigation map">
+            <div class="restricted-zone">Restricted zone</div>
+            <div class="route-line"></div>
+            <div class="contact contact-a">C1</div>
+            <div class="contact contact-b">C2</div>
+            <div class="vessel" id="vessel" aria-hidden="true"></div>
+          </div>
+          <div class="telemetry-grid">
+            <div><span>Speed</span><strong id="speedValue">8.0 kt</strong></div>
+            <div><span>Heading</span><strong id="headingValue">090 deg</strong></div>
+            <div><span>Restricted distance</span><strong id="distanceValue">7.2 nm</strong></div>
+            <div><span>Sensor confidence</span><strong id="confidenceValue">92%</strong></div>
+            <div><span>Weather</span><strong id="weatherValue">Low</strong></div>
+            <div><span>Nearby contacts</span><strong id="contactsValue">2</strong></div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Anomaly Model</p>
+              <h2>Safe Cluster Projection</h2>
+            </div>
+            <span class="pill">Local-only scoring</span>
+          </div>
+          <canvas id="scatterCanvas" width="720" height="430" aria-label="Safe cluster and scored command projection"></canvas>
+          <div class="legend">
+            <span><i class="legend-dot safe"></i>Baseline safe operations</span>
+            <span><i class="legend-dot live"></i>Current command</span>
+            <span><i class="legend-dot contained"></i>Contained command</span>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Harness Decision</p>
+              <h2>Policy Pack + Anomaly Gate</h2>
+            </div>
+          </div>
+          <div class="decision-stack" id="decisionStack">
+            <div class="decision-row approved">
+              <span>POL-BOOT</span>
+              <strong>Approved</strong>
+              <p>Safe baseline loaded into local memory.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Agent Loop</p>
+              <h2>Proposed Command</h2>
+            </div>
+            <span class="pill" id="commandType">hold_position</span>
+          </div>
+          <pre class="command-box" id="commandBox">{
+  "type": "hold_position",
+  "value": 0,
+  "reason": "Awaiting simulation start."
+}</pre>
+          <div class="loop-list">
+            <span>Observe</span>
+            <span>Plan</span>
+            <span>Propose</span>
+            <span>Intercept</span>
+            <span>Decide</span>
+            <span>Log</span>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel feed-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Audit Feed</p>
+            <h2>Command Decisions</h2>
+          </div>
+          <button class="secondary-button" id="copyLatestBtn" type="button">Copy Latest Event</button>
+        </div>
+        <div class="feed-table" role="table" aria-label="Command decision feed">
+          <div class="feed-header" role="row">
+            <span>Time</span>
+            <span>Mode</span>
+            <span>Command</span>
+            <span>Score</span>
+            <span>Verdict</span>
+            <span>Reason</span>
+          </div>
+          <div id="feedBody"></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

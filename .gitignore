@@ -1,0 +1,7 @@
+data/raw/
+data/processed/
+*.duckdb
+*.parquet
+__pycache__/
+.pytest_cache/
+*.pyc
