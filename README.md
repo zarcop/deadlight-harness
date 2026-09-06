@@ -12,6 +12,13 @@ before. Everything runs on CPU, air-gapped, inside a ~10 ms intercept budget.
 Built for DDIL conditions (Denied, Disrupted, Intermittent, Limited): once the
 model is staged, no part of the pipeline touches the network.
 
+The repository holds **two** systems. The **harness** is the safety layer. The
+**agents** are mock naval autonomy agents that propose commands — one of them
+running on external inference through the Claude API — and exist to give the
+harness something real to contain. They meet at `agent_harness_bridge.py`.
+
+For how it all fits together, read **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
 ---
 
 ## Pipeline
@@ -38,6 +45,28 @@ model is staged, no part of the pipeline touches the network.
           ▼
    actuators / UI socket
 ```
+
+With an agent in the loop, the same harness sits between intent and actuation:
+
+```
+┌───────────────────┐   Claude or the deterministic brain
+│   agent_brain     │   proposes ONE CommandProposal (intent)
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐   CommandActuator computes the telemetry frame
+│ agent_harness_    │   that command WOULD produce -- a candidate
+│     bridge        │
+└─────────┬─────────┘
+          ▼
+    the harness above evaluates the CANDIDATE frame
+          │
+          ├── PERMIT / REVIEW ──▶ commit: the unit moves
+          └── CONTAIN         ──▶ discard: the unit holds its last safe state
+```
+
+Judging the candidate rather than the committed frame is what makes this
+containment rather than after-the-fact alerting: the violating state never
+reaches the actuators.
 
 ---
 
@@ -76,6 +105,16 @@ python latent_projector.py
 20 nominal patrol steps, an EMCON breach, then a navigation divergence, printing
 live verdicts.
 
+To prove the harness contains a misbehaving agent — the same agent and seed run
+once guarded and once unguarded:
+
+```bash
+python agent_harness_bridge.py --steps 18
+```
+
+Add `--backend anthropic` to drive it with Claude instead of the offline brain
+(needs `ANTHROPIC_API_KEY`, read from the environment or a local `.env`).
+
 For the live dashboard:
 
 ```bash
@@ -106,6 +145,16 @@ export EDGE_EMBED_CACHE=/path/to/models
 | `main_harness.py` | The intercept loop plus a stdlib-only SSE server and command injection |
 | `ui/dashboard.html` | Live watchstander dashboard: corridor view, verdict feed, layer panel |
 
+Agent layer:
+
+| Module | Role |
+| --- | --- |
+| `agent_protocol.py` | Wire contracts: `CommandType`, `AgentPersona`, `CommandProposal`, `SandboxVerdict` |
+| `agent_brain.py` | Two brains behind one interface: deterministic offline, and Claude via the Anthropic SDK |
+| `mock_navy_agent.py` | Open-loop runner — streams scripted telemetry past a brain, records JSONL |
+| `prompt_criteria_agent.py` | Derives typed acceptance/rejection criteria from an operator prompt |
+| `agent_harness_bridge.py` | Closes the loop: actuation, candidate evaluation, containment proof |
+
 ### Verdict contract
 
 ```python
@@ -117,6 +166,18 @@ PolicyVerdict(
     explanation,        # short diagnostic for the watchstander
 )
 ```
+
+On the agent wire the verdict is graded by **which layer fired**:
+
+| Layer | Wire verdict | Why |
+| --- | --- | --- |
+| Doctrinal tripwire | `CONTAIN` | A known violation — blocks outright |
+| Latent distance only | `REVIEW` | A statistical suspicion — escalates to a human, still actuates |
+| Neither | `PERMIT` | — |
+
+That split matters: the latent layer's false-positive rate is ~0.4%, and at a
+10-second tick an automatic `CONTAIN` on each drops a legitimate command roughly
+every 40 minutes. `--no-review` restores strict blocking.
 
 ### Dashboard payloads
 
@@ -181,6 +242,46 @@ costs a quarter of a gigabyte. Lower `batch_size` further on a tighter node.
 
 ---
 
+## Containment, measured
+
+`agent_harness_bridge.py` runs a counterfactual on every invocation: the same
+agent and seed, once with the harness able to veto and once with it observing
+only. Without the unguarded arm there is no evidence that containment is what
+kept the unit clean rather than luck.
+
+Claude driving a faulty agent, 18 steps:
+
+| metric | guarded | unguarded |
+| --- | --- | --- |
+| dangerous proposals | 6 | 10 |
+| stopped before actuation | **6 / 6** | 0 |
+| **frames in violation** | **0** | **10** |
+
+A compliant agent is left alone entirely — zero containments, zero reviews. When
+the agent never misbehaves the run reports `CONTAINMENT NOT EXERCISED` rather
+than a failure: nothing asked anything of the harness.
+
+### Calibrate on the distribution you will judge
+
+The manifold must be calibrated on the telemetry it will actually see. The
+original baseline came from the scripted generator (a unit that only holds course
+at 12–16 kts); the closed loop's telemetry comes from an actuator driven by an
+agent commanding real course and speed changes. Same seed, same agent, only the
+calibration differing:
+
+| calibration | false positives (guarded) | false positives (unguarded) | detection |
+| --- | --- | --- | --- |
+| `generator` | 6 / 16 | 16 / 16 | 6 / 6 stopped |
+| `agent` (default) | **0 / 16** | **0 / 16** | 6 / 6 stopped |
+
+Detection survived because the deterministic tripwires do not depend on τ.
+`--calibration generator` reproduces the old behaviour so the difference can be
+measured rather than asserted. If you change where telemetry comes from,
+re-calibrate: `policy_engine.build_manifold_from_windows()` takes arbitrary
+nominal windows.
+
+---
+
 ## Known limitations
 
 These are measured, not hypothetical. Read them before trusting the harness in a
@@ -223,6 +324,15 @@ stay armed throughout.
 **Scenario generators are seeded mocks**, not recorded traffic. τ, the envelope,
 and every number above are calibrated against synthetic nominal behaviour and
 must be re-derived from real telemetry before this means anything operationally.
+The containment results carry the same caveat: the agents are mocks and the
+actuator is a simplified physics model, so the proof shows the mechanism works,
+not that these thresholds are operationally valid.
+
+**Claude proposals can fail validation.** `CommandProposal` enforces cross-field
+rules a JSON schema cannot express, so a schema-valid response can still be an
+invalid command. Those fall back to the deterministic brain — the DDIL behaviour
+you want — and the first failure and every tenth logs the actual cause rather
+than failing silently.
 
 ---
 
@@ -240,7 +350,14 @@ the code:
    bge on x86 nodes.
 2. **Layout.** Modules live at the repository root rather than under `core/`.
 
-`main_harness.py` and the `ui/` dashboard from the spec are not built yet.
+The spec's `main_harness.py` and `ui/` dashboard now exist. The agent layer
+(`agent_protocol`, `agent_brain`, `mock_navy_agent`, `agent_harness_bridge`) is
+an addition beyond that spec — it is what the harness is tested *against*.
+
+The agent brain runs on **Claude** (`claude-opus-5` by default) via the official
+Anthropic SDK, not OpenAI. Inference is the one part of the system that leaves
+the node; the harness itself stays air-gapped, and the agent degrades to a
+deterministic offline brain whenever the link or the key is unavailable.
 
 ---
 
