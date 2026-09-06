@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edge Naval AI Sandbox</title>
+<style>
+  :root {
+    --bg: #070b10; --panel: #0d141c; --line: #1b2836; --ink: #c8d6e5;
+    --dim: #64798f; --green: #2ee6a8; --amber: #ffb454; --red: #ff4d5e;
+    --blue: #4da3ff; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 var(--mono); overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 18px; padding: 10px 18px;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 13px; margin: 0; letter-spacing: .14em; font-weight: 600; }
+  .pill {
+    padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px;
+    font-size: 11px; color: var(--dim);
+  }
+  .pill b { color: var(--ink); font-weight: 600; }
+  .pill.live { color: var(--green); border-color: rgba(46,230,168,.35); }
+  .pill.offline { color: var(--red); border-color: rgba(255,77,94,.4); }
+
+  main {
+    display: grid; grid-template-columns: 1fr 340px;
+    grid-template-rows: 1fr 240px; gap: 10px; padding: 10px;
+    height: calc(100vh - 45px);
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; overflow: hidden; display: flex; flex-direction: column;
+  }
+  .panel > h2 {
+    font-size: 10px; letter-spacing: .16em; color: var(--dim);
+    margin: 0 0 8px; font-weight: 600; text-transform: uppercase;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .panel > h2 small { color: var(--dim); letter-spacing: 0; text-transform: none; }
+  canvas { width: 100%; flex: 1; display: block; }
+
+  /* verdict banner */
+  #verdictCard { grid-row: span 2; }
+  #verdict {
+    font-size: 30px; font-weight: 700; letter-spacing: .06em; margin: 2px 0 4px;
+  }
+  #verdict.permit { color: var(--green); }
+  #verdict.contain { color: var(--red); }
+  #failure { font-size: 12px; color: var(--amber); min-height: 18px; }
+  #explanation {
+    font-size: 11px; color: var(--dim); line-height: 1.5; margin: 8px 0 12px;
+    min-height: 54px; border-left: 2px solid var(--line); padding-left: 9px;
+  }
+  .layers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .layer {
+    border: 1px solid var(--line); border-radius: 5px; padding: 8px 9px;
+    opacity: .35; transition: opacity .12s, border-color .12s;
+  }
+  .layer.hot { opacity: 1; border-color: var(--red); background: rgba(255,77,94,.09); }
+  .layer .n { font-size: 10px; color: var(--dim); letter-spacing: .1em; }
+  .layer .v { font-size: 15px; font-weight: 700; margin-top: 3px; }
+  #earlyBadge {
+    display: none; margin-bottom: 12px; padding: 7px 9px; border-radius: 5px;
+    background: rgba(255,180,84,.12); border: 1px solid rgba(255,180,84,.45);
+    color: var(--amber); font-size: 11px; line-height: 1.45;
+  }
+  #earlyBadge.show { display: block; }
+
+  table.kv { width: 100%; border-collapse: collapse; font-size: 11px; }
+  table.kv td { padding: 3px 0; }
+  table.kv td:first-child { color: var(--dim); }
+  table.kv td:last-child { text-align: right; }
+  td.bad { color: var(--red); font-weight: 600; }
+  td.warn { color: var(--amber); }
+
+  /* buttons */
+  .btns { display: grid; gap: 6px; margin-top: auto; padding-top: 10px; }
+  button {
+    font: inherit; font-size: 11px; text-align: left; cursor: pointer;
+    background: #131d28; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 5px; padding: 8px 10px; transition: .12s;
+  }
+  button:hover { border-color: var(--red); color: #fff; background: #1a2634; }
+  button.reset:hover { border-color: var(--green); }
+  button b { display: block; font-size: 11px; margin-bottom: 1px; }
+  button span { color: var(--dim); font-size: 10px; }
+
+  /* feed */
+  #feed { flex: 1; overflow-y: auto; font-size: 11px; }
+  #feed .row {
+    display: grid; grid-template-columns: 34px 62px 1fr 52px;
+    gap: 6px; padding: 3px 0; border-bottom: 1px solid rgba(27,40,54,.5);
+  }
+  #feed .row .seq { color: var(--dim); }
+  #feed .row .v.permit { color: var(--green); }
+  #feed .row .v.contain { color: var(--red); font-weight: 600; }
+  #feed .row .m { color: var(--dim); overflow: hidden; text-overflow: ellipsis;
+                  white-space: nowrap; }
+  #feed .row .t { color: var(--dim); text-align: right; }
+  #feed .row.early { background: rgba(255,180,84,.08); }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  .stat { border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; }
+  .stat .n { font-size: 9px; color: var(--dim); letter-spacing: .1em; }
+  .stat .v { font-size: 16px; font-weight: 700; margin-top: 2px; }
+  .note { font-size: 10px; color: var(--dim); margin-top: 6px; line-height: 1.45; }
+</style>
+</head>
+<body>
+<header>
+  <h1>EDGE NAVAL AI SANDBOX</h1>
+  <span class="pill" id="unitPill">unit <b>—</b></span>
+  <span class="pill" id="modelPill">model <b>—</b></span>
+  <span class="pill" id="airPill">link <b>AIR-GAPPED</b></span>
+  <span class="pill" id="latPill">intercept <b>— ms</b></span>
+  <span class="pill live" id="connPill">● LIVE</span>
+</header>
+
+<main>
+  <!-- centrepiece: the corridor -->
+  <section class="panel" style="grid-column:1; grid-row:1;">
+    <h2>Tactical corridor <small id="corridorSub">cross-track deviation vs. distance run</small></h2>
+    <canvas id="corridor"></canvas>
+  </section>
+
+  <!-- decision -->
+  <aside class="panel" id="verdictCard" style="grid-column:2; grid-row:1 / span 2;">
+    <h2>Decision</h2>
+    <div id="verdict" class="permit">—</div>
+    <div id="failure"></div>
+    <div id="explanation">awaiting first frame…</div>
+
+    <div class="layers">
+      <div class="layer" id="layerRule">
+        <div class="n">GUARDRAIL</div><div class="v" id="ruleVal">—</div>
+      </div>
+      <div class="layer" id="layerLatent">
+        <div class="n">LATENT</div><div class="v" id="latentVal">—</div>
+      </div>
+    </div>
+
+    <div id="earlyBadge">
+      <b>CAUGHT BEFORE ANY RULE BROKE.</b>
+      No hard limit exceeded — contained on behaviour alone.
+    </div>
+
+    <table class="kv">
+      <tr><td>speed</td><td id="kSpeed">—</td></tr>
+      <tr><td>course</td><td id="kCourse">—</td></tr>
+      <tr><td>EMCON</td><td id="kEmcon">—</td></tr>
+      <tr><td>radar</td><td id="kRadar">—</td></tr>
+      <tr><td>AIS</td><td id="kAis">—</td></tr>
+      <tr><td>corridor dev.</td><td id="kDev">—</td></tr>
+      <tr><td>latent distance</td><td id="kDist">—</td></tr>
+      <tr><td>τ threshold</td><td id="kTau">—</td></tr>
+    </table>
+
+    <div class="btns" id="btns"></div>
+  </aside>
+
+  <!-- feed -->
+  <section class="panel" style="grid-column:1; grid-row:2;">
+    <h2>Intercept log <small id="logSub"></small></h2>
+    <div id="feed"></div>
+    <div class="stats">
+      <div class="stat"><div class="n">FRAMES</div><div class="v" id="sFrames">0</div></div>
+      <div class="stat"><div class="n">CONTAINED</div><div class="v" id="sContained" style="color:var(--red)">0</div></div>
+      <div class="stat"><div class="n">EARLY CATCH</div><div class="v" id="sEarly" style="color:var(--amber)">0</div></div>
+      <div class="stat"><div class="n">p95 INTERCEPT</div><div class="v" id="sP95">—</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+  let scene = null, thresholds = null;
+  const trail = [];          // corridor history
+  const TRAIL_MAX = 90;
+
+  // ---------- corridor rendering ----------
+  const cv = $("corridor"), cx = cv.getContext("2d");
+  function fit(c) {
+    const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    c.width = r.width * d; c.height = r.height * d;
+    c.getContext("2d").setTransform(d, 0, 0, d, 0, 0);
+    return { w: r.width, h: r.height };
+  }
+
+  function drawCorridor() {
+    const { w, h } = fit(cv);
+    cx.clearRect(0, 0, w, h);
+    if (!thresholds) return;
+
+    const hazard = thresholds.corridor_hazard_m;
+    const maxDev = hazard * 1.35;                 // vertical half-range, metres
+    const midY = h / 2;
+    const yOf = m => midY - (m / maxDev) * (h / 2 - 14);
+
+    // hazard fill (outside ±hazard)
+    cx.fillStyle = "rgba(255,77,94,.07)";
+    cx.fillRect(0, 0, w, yOf(hazard));
+    cx.fillRect(0, yOf(-hazard), w, h - yOf(-hazard));
+    // safe lane
+    cx.fillStyle = "rgba(46,230,168,.05)";
+    cx.fillRect(0, yOf(thresholds.corridor_warning_m), w,
+                yOf(-thresholds.corridor_warning_m) - yOf(thresholds.corridor_warning_m));
+
+    const line = (m, colour, dash, label) => {
+      cx.save(); cx.strokeStyle = colour; cx.setLineDash(dash); cx.lineWidth = 1;
+      cx.beginPath(); cx.moveTo(0, yOf(m)); cx.lineTo(w, yOf(m)); cx.stroke();
+      cx.restore();
+      if (label) {
+        cx.fillStyle = colour; cx.font = "10px ui-monospace, monospace";
+        cx.fillText(label, 6, yOf(m) - 4);
+      }
+    };
+    line(hazard, "rgba(255,77,94,.55)", [5, 4], `HAZARD ${hazard}m`);
+    line(-hazard, "rgba(255,77,94,.55)", [5, 4], null);
+    line(thresholds.corridor_warning_m, "rgba(255,180,84,.4)", [3, 5],
+         `advisory ${thresholds.corridor_warning_m}m`);
+    line(-thresholds.corridor_warning_m, "rgba(255,180,84,.4)", [3, 5], null);
+    line(0, "rgba(77,163,255,.5)", [1, 6], "planned route");
+
+    if (!trail.length) return;
+    const x0 = trail[0].along, x1 = Math.max(trail[trail.length - 1].along, x0 + 1);
+    const xOf = a => 30 + ((a - x0) / (x1 - x0)) * (w - 60);
+
+    // track
+    cx.beginPath();
+    trail.forEach((p, i) => {
+      const X = xOf(p.along), Y = yOf(p.dev);
+      i ? cx.lineTo(X, Y) : cx.moveTo(X, Y);
+    });
+    cx.strokeStyle = "rgba(200,214,229,.45)"; cx.lineWidth = 1.5; cx.stroke();
+
+    // points
+    trail.forEach(p => {
+      cx.beginPath();
+      cx.arc(xOf(p.along), yOf(p.dev), p.contained ? 2.6 : 1.8, 0, Math.PI * 2);
+      cx.fillStyle = p.contained ? "#ff4d5e" : "rgba(46,230,168,.6)";
+      cx.fill();
+    });
+
+    // the unit
+    const last = trail[trail.length - 1];
+    const ux = xOf(last.along), uy = yOf(last.dev);
+    cx.save(); cx.translate(ux, uy); cx.rotate((last.course - 90) * Math.PI / 180);
+    cx.beginPath(); cx.moveTo(11, 0); cx.lineTo(-7, 6); cx.lineTo(-4, 0); cx.lineTo(-7, -6);
+    cx.closePath();
+    cx.fillStyle = last.contained ? "#ff4d5e" : "#2ee6a8"; cx.fill();
+    cx.restore();
+
+    cx.strokeStyle = last.contained ? "rgba(255,77,94,.35)" : "rgba(46,230,168,.3)";
+    cx.beginPath(); cx.arc(ux, uy, 15, 0, Math.PI * 2); cx.stroke();
+
+    cx.fillStyle = "#64798f"; cx.font = "10px ui-monospace, monospace";
+    cx.fillText(`${Math.round(last.dev)}m off route`, ux + 20, uy - 8);
+  }
+
+  // ---------- boot ----------
+  async function boot() {
+    scene = await (await fetch("/scene")).json();
+    thresholds = scene.thresholds;
+    const h = scene.harness;
+    $("unitPill").innerHTML = `unit <b>${h.unit_id}</b>`;
+    $("modelPill").innerHTML = `model <b>${h.embedding_model.split("/").pop()}</b>`;
+    $("airPill").innerHTML = `link <b>${h.air_gapped ? "AIR-GAPPED" : "ONLINE"}</b>`;
+    $("kTau").textContent = h.tau.toFixed(4);
+    $("logSub").textContent =
+      `baseline ${h.baseline_size} nominal windows · k=${h.top_k} · τ=${h.tau.toFixed(4)}`;
+
+    $("btns").innerHTML = scene.injections.map(i =>
+      `<button data-cmd="${i.key}"><b>${i.label}</b><span>${i.description}</span></button>`
+    ).join("") +
+      `<button class="reset" data-cmd="RESET"><b>Stand down</b>
+        <span>Return the unit to nominal patrol.</span></button>`;
+
+    $("btns").addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      fetch("/inject", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: b.dataset.cmd })
+      });
+    });
+
+    drawCorridor();
+    listen();
+  }
+
+  // ---------- live stream ----------
+  function listen() {
+    const es = new EventSource("/stream");
+    es.onopen = () => {
+      $("connPill").className = "pill live"; $("connPill").textContent = "● LIVE";
+    };
+    es.onerror = () => {
+      $("connPill").className = "pill offline"; $("connPill").textContent = "● NO STREAM";
+    };
+    es.onmessage = ev => render(JSON.parse(ev.data));
+  }
+
+  function render(f) {
+    const t = f.telemetry, contained = f.verdict === "CONTAIN";
+
+    trail.push({ along: t.along_track_m, dev: t.corridor_deviation_m,
+                 course: t.course_deg, contained });
+    if (trail.length > TRAIL_MAX) trail.shift();
+    drawCorridor();
+
+    $("verdict").textContent = f.verdict;
+    $("verdict").className = contained ? "contain" : "permit";
+    $("failure").textContent = f.failure_mode === "NONE" ? "" : f.failure_mode;
+    $("explanation").textContent = f.explanation;
+
+    $("layerRule").classList.toggle("hot", f.layer === "TRIPWIRE");
+    $("layerLatent").classList.toggle("hot", f.layer === "LATENT");
+    $("ruleVal").textContent = f.layer === "TRIPWIRE" ? "FIRED" : "clear";
+    $("latentVal").textContent = f.layer === "LATENT" ? "OFF-MANIFOLD" : "inside";
+    $("earlyBadge").classList.toggle("show", !!f.early_catch);
+
+    const emconAlpha = t.emcon_state === thresholds.emcon_alpha;
+    const set = (id, txt, cls) => {
+      const el = $(id); el.textContent = txt; el.className = cls || "";
+    };
+    set("kSpeed", `${t.speed_kts.toFixed(1)} kts`,
+        t.speed_kts > thresholds.speed_ceiling_kts ? "bad" : "");
+    set("kCourse", `${t.course_deg.toFixed(0)}°`);
+    set("kEmcon", t.emcon_state);
+    set("kRadar", `${t.radar_rf_kw.toFixed(1)} kW`,
+        (emconAlpha && t.radar_rf_kw > 0) ? "bad" : "");
+    set("kAis", t.ais_active ? "TRANSMITTING" : "silent",
+        (emconAlpha && t.ais_active) ? "bad" : "");
+    set("kDev", `${t.corridor_deviation_m.toFixed(0)} m`,
+        t.corridor_deviation_m > thresholds.corridor_hazard_m ? "bad"
+        : t.corridor_deviation_m > thresholds.corridor_warning_m ? "warn" : "");
+    set("kDist", f.neighbor_distance.toFixed(4),
+        f.neighbor_distance > f.threshold ? "warn" : "");
+
+    $("latPill").innerHTML = `intercept <b>${f.latency.total_ms.toFixed(1)} ms</b>`;
+
+    const row = document.createElement("div");
+    row.className = "row" + (f.early_catch ? " early" : "");
+    row.innerHTML =
+      `<span class="seq">${f.seq}</span>` +
+      `<span class="v ${contained ? "contain" : "permit"}">${f.verdict}</span>` +
+      `<span class="m">${f.failure_mode === "NONE"
+          ? `dev ${t.corridor_deviation_m.toFixed(0)}m · ${t.speed_kts.toFixed(1)}kts`
+          : (f.tripwire || f.failure_mode)}</span>` +
+      `<span class="t">${f.latency.total_ms.toFixed(1)}ms</span>`;
+    const feed = $("feed");
+    feed.prepend(row);
+    while (feed.childElementCount > 80) feed.lastElementChild.remove();
+
+    $("sFrames").textContent = f.stats.frames;
+    $("sContained").textContent = f.stats.contained;
+    $("sEarly").textContent = f.stats.early_catches;
+    $("sP95").textContent = `${f.stats.p95_total_ms.toFixed(1)}ms`;
+  }
+
+  window.addEventListener("resize", drawCorridor);
+  boot().catch(e => { $("explanation").textContent = "boot failed: " + e.message; });
+})();
+</script>
+</body>
+</html>
