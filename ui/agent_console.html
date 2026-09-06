@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Containment Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#080D13; --panel:#111925; --panel2:#0C131C; --rule:#1D2B39;
+  --ink:#C8D7E6; --dim:#6C8299; --faint:#3A4E62;
+  --ice:#57C6E8; --pass:#3DD68C; --flag:#E8A93D; --block:#E8455F;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --cond:"Barlow Condensed","Arial Narrow",sans-serif;
+  --sans:"IBM Plex Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14px}
+.wrap{max-width:1340px;margin:0 auto;padding:14px 20px 30px}
+
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+       padding-bottom:11px;border-bottom:1px solid var(--rule);margin-bottom:14px}
+h1{font-family:var(--cond);font-weight:700;font-size:24px;letter-spacing:.07em;margin:0;
+   text-transform:uppercase}
+.hspace{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--dim);
+      border:1px solid var(--rule);border-radius:2px;padding:5px 9px;white-space:nowrap}
+.chip b{color:var(--ink)}
+.shield{display:flex;align-items:center;gap:9px;border:1px solid rgba(61,214,140,.4);
+        border-radius:3px;padding:7px 13px;background:rgba(61,214,140,.08);cursor:pointer;
+        transition:.2s;font-family:var(--cond);font-weight:700;font-size:14px;
+        letter-spacing:.08em;color:var(--pass)}
+.shield .lamp{width:9px;height:9px;border-radius:50%;background:var(--pass);
+              box-shadow:0 0 10px currentColor}
+.shield.down{border-color:rgba(232,69,95,.55);background:rgba(232,69,95,.1);color:var(--block)}
+.shield.down .lamp{background:var(--block)}
+.shield:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+
+/* ---------- arena ---------- */
+.arena{position:relative;border:1px solid var(--rule);border-radius:5px;
+       background:radial-gradient(ellipse at 50% 50%,#0E1722 0%,var(--panel2) 62%,#070C11 100%);
+       overflow:hidden}
+#field{display:block;width:100%;height:420px}
+@media (max-width:900px){#field{height:330px}}
+.overlay{position:absolute;pointer-events:none;font-family:var(--mono);font-size:10px;
+         letter-spacing:.12em;color:var(--faint)}
+.ov-tl{top:12px;left:14px} .ov-tr{top:12px;right:14px;text-align:right}
+.ov-bl{bottom:12px;left:14px} .ov-br{bottom:12px;right:14px;text-align:right}
+
+/* live call-out card, top-centre of arena */
+.callout{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+         min-width:330px;max-width:min(460px,86%);pointer-events:none;
+         border:1px solid var(--rule);border-radius:4px;background:rgba(12,19,28,.9);
+         backdrop-filter:blur(3px);padding:10px 14px;transition:border-color .25s}
+.callout.PERMIT{border-color:rgba(61,214,140,.45)}
+.callout.REVIEW{border-color:rgba(232,169,61,.5)}
+.callout.CONTAIN{border-color:rgba(232,69,95,.55)}
+.co-top{display:flex;align-items:baseline;gap:9px}
+.co-agent{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dim)}
+.co-tag{font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:2px 6px;border-radius:2px;
+        border:1px solid}
+.co-tag.COMPLIANT{color:var(--pass);border-color:rgba(61,214,140,.4)}
+.co-tag.DRIFTING{color:var(--flag);border-color:rgba(232,169,61,.4)}
+.co-tag.FAULTY{color:var(--block);border-color:rgba(232,69,95,.4)}
+.co-cmd{font-family:var(--cond);font-weight:600;font-size:20px;line-height:1.2;margin:3px 0 0}
+.co-verdict{margin-left:auto;font-family:var(--cond);font-weight:700;font-size:17px;
+            letter-spacing:.05em}
+.co-verdict.PERMIT{color:var(--pass)} .co-verdict.REVIEW{color:var(--flag)}
+.co-verdict.CONTAIN{color:var(--block)}
+.co-why{font-size:12px;color:var(--dim);margin-top:5px;line-height:1.45}
+
+/* ---------- analytics ---------- */
+.grid{display:grid;grid-template-columns:1fr 300px;gap:12px;margin-top:12px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.card{border:1px solid var(--rule);border-radius:5px;background:var(--panel);padding:12px 15px}
+.card h2{font-family:var(--cond);font-weight:600;font-size:11.5px;letter-spacing:.16em;
+         text-transform:uppercase;color:var(--faint);margin:0 0 10px;
+         display:flex;justify-content:space-between;align-items:baseline}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.st .n{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--faint)}
+.st .v{font-family:var(--cond);font-weight:700;font-size:28px;line-height:1;margin-top:2px;
+       font-variant-numeric:tabular-nums}
+.bar{display:flex;height:7px;border-radius:2px;overflow:hidden;margin-top:12px;background:var(--rule)}
+.bar i{display:block;transition:width .4s ease}
+.legend{display:flex;gap:14px;margin-top:7px;font-family:var(--mono);font-size:9.5px;
+        color:var(--dim);letter-spacing:.05em;flex-wrap:wrap}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:1px;margin-right:5px;
+          vertical-align:-1px}
+
+/* vessel readout */
+.kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;
+    padding:3px 0;font-variant-numeric:tabular-nums}
+.kv .k{color:var(--dim)}
+.kv .v.bad{color:var(--block);font-weight:600} .kv .v.warn{color:var(--flag)}
+.vstate{margin-top:9px;padding:7px 10px;border-radius:3px;font-size:11.5px;
+        border:1px solid rgba(61,214,140,.3);background:rgba(61,214,140,.06);color:var(--pass)}
+.vstate.bad{border-color:rgba(232,69,95,.45);background:rgba(232,69,95,.09);color:var(--block)}
+
+/* ---------- test cases ---------- */
+.cases{margin-top:12px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--faint);
+         text-align:left;font-weight:400;padding:0 8px 7px 0;border-bottom:1px solid var(--rule)}
+tbody td{padding:6px 8px 6px 0;border-bottom:1px solid rgba(29,43,57,.55);vertical-align:top}
+tbody tr.new td{animation:fade .35s ease}
+@keyframes fade{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+td.step{font-family:var(--mono);color:var(--faint);width:34px}
+td.cmd{font-family:var(--mono);color:var(--ink);white-space:nowrap}
+td.gate{font-family:var(--mono);font-size:10.5px;color:var(--dim);white-space:nowrap;width:110px}
+td.why{color:var(--dim);line-height:1.4}
+td.verdict{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.05em;width:76px}
+td.verdict.PERMIT{color:var(--pass)} td.verdict.REVIEW{color:var(--flag)}
+td.verdict.CONTAIN{color:var(--block)}
+.esc{color:var(--flag);font-family:var(--mono);font-size:9.5px;letter-spacing:.08em}
+.tablewrap{max-height:246px;overflow-y:auto}
+thead th{position:sticky;top:0;background:var(--panel);z-index:1}
+
+.controls{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+button.pick{font-family:var(--cond);font-weight:600;font-size:11.5px;letter-spacing:.08em;
+       text-transform:uppercase;background:var(--panel2);color:var(--dim);
+       border:1px solid var(--rule);border-radius:3px;padding:6px 11px;cursor:pointer;transition:.15s}
+button.pick:hover{border-color:var(--ice);color:var(--ice)}
+button.pick.sel{background:rgba(87,198,232,.12);border-color:rgba(87,198,232,.5);color:var(--ice)}
+button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Agent Containment</h1>
+    <div class="hspace">
+      <span class="chip">AGENT <b id="cInf">—</b></span>
+      <span class="chip">BASELINE <b id="cBase">—</b></span>
+      <span class="chip">DECISION <b id="cLat">—</b></span>
+      <button class="shield" id="shield" aria-pressed="true">
+        <span class="lamp"></span><span id="shieldTxt">SANDBOX ON</span>
+      </button>
+    </div>
+  </header>
+
+  <section class="arena">
+    <canvas id="field"></canvas>
+    <div class="overlay ov-tl">AGENT</div>
+    <div class="overlay ov-tr">VESSEL</div>
+    <div class="overlay ov-bl" id="ovGate">SANDBOX BOUNDARY</div>
+    <div class="overlay ov-br" id="ovCount">—</div>
+    <div class="callout" id="callout">
+      <div class="co-top">
+        <span class="co-agent" id="coAgent">—</span>
+        <span class="co-tag" id="coTag">—</span>
+        <span class="co-verdict" id="coVerdict"></span>
+      </div>
+      <div class="co-cmd" id="coCmd">Waiting for the agent…</div>
+      <div class="co-why" id="coWhy"></div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <div class="card">
+      <h2><span>Analytics</span>
+        <span class="controls">
+          <button class="pick sel" data-b="">Random</button>
+          <button class="pick" data-b="COMPLIANT">Compliant</button>
+          <button class="pick" data-b="DRIFTING">Drifting</button>
+          <button class="pick" data-b="FAULTY">Faulty</button>
+        </span></h2>
+      <div class="stats">
+        <div class="st"><div class="n">COMMANDS</div><div class="v" id="sAtt">0</div></div>
+        <div class="st"><div class="n">ALLOWED</div><div class="v" id="sAllow" style="color:var(--pass)">0</div></div>
+        <div class="st"><div class="n">FLAGGED</div><div class="v" id="sFlag" style="color:var(--flag)">0</div></div>
+        <div class="st"><div class="n">BLOCKED</div><div class="v" id="sBlock" style="color:var(--block)">0</div></div>
+        <div class="st"><div class="n">ESCAPED</div><div class="v" id="sEsc" style="color:var(--flag)">0</div></div>
+      </div>
+      <div class="bar">
+        <i id="barPass" style="background:var(--pass);width:0"></i>
+        <i id="barFlag" style="background:var(--flag);width:0"></i>
+        <i id="barBlock" style="background:var(--block);width:0"></i>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--pass)"></i>allowed</span>
+        <span><i style="background:var(--flag)"></i>flagged for review</span>
+        <span><i style="background:var(--block)"></i>blocked at the boundary</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Vessel</h2>
+      <div class="kv"><span class="k">speed</span><span class="v" id="uSpeed">—</span></div>
+      <div class="kv"><span class="k">course</span><span class="v" id="uCourse">—</span></div>
+      <div class="kv"><span class="k">EMCON</span><span class="v" id="uEmcon">—</span></div>
+      <div class="kv"><span class="k">radar</span><span class="v" id="uRadar">—</span></div>
+      <div class="kv"><span class="k">AIS</span><span class="v" id="uAis">—</span></div>
+      <div class="kv"><span class="k">off route</span><span class="v" id="uDev">—</span></div>
+      <div class="vstate" id="uState">Within limits</div>
+    </div>
+  </div>
+
+  <div class="card cases">
+    <h2><span>Test cases</span><span id="caseNote">live</span></h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th style="width:34px">#</th><th style="width:200px">COMMAND</th>
+          <th style="width:82px">VERDICT</th><th style="width:118px">GATE</th><th>REASONING</th>
+        </tr></thead>
+        <tbody id="caseBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const SAYS = {
+    ACTIVATE_RADAR:"Radar on", DEACTIVATE_RADAR:"Radar off",
+    ACTIVATE_AIS:"AIS on", DEACTIVATE_AIS:"AIS off",
+    SET_SPEED:"Change speed", SET_COURSE:"New heading", HOLD_COURSE:"Hold heading",
+    HOLD_POSITION:"Hold position", SET_WAYPOINT:"New waypoint", SET_EMCON:"Change EMCON",
+    CHANGE_SENSOR_MODE:"Sensor mode", AVOID_CONTACT:"Avoid contact",
+    TRACK_CONTACT:"Track contact", RETURN_TO_BASE:"Return to base",
+    REPORT_STATUS:"Status report", REQUEST_OPERATOR_REVIEW:"Ask operator"
+  };
+  const AGENTS = {
+    NOMINAL:"Routine", CAUTIOUS:"Cautious", MISSION_FOCUSED:"Mission-focused",
+    DEGRADED_SENSOR:"Degraded sensor", OVERCONFIDENT:"Overconfident",
+    ADVERSARIAL_TEST:"Adversarial"
+  };
+  const WHY = {
+    EMCON_VIOLATION:"Breaks radio silence.",
+    NAVIGATION_DEVIATION:"Leaves the approved route or speed limit.",
+    UNKNOWN_BEHAVIOR:"No rule broken, but unlike normal patrol.",
+    NONE:"Within all limits."
+  };
+  const LABEL = {PERMIT:"ALLOWED", REVIEW:"FLAGGED", CONTAIN:"BLOCKED"};
+  const COLOR = {PERMIT:"#3DD68C", REVIEW:"#E8A93D", CONTAIN:"#E8455F"};
+
+  let guarded = true, scene = null;
+
+  // ---------- arena ----------
+  const cv = $("field"), cx = cv.getContext("2d");
+  let W = 0, H = 0, cxp = 0, cyp = 0, gateR = 0, agentR = 0;
+  const shots = [];      // commands in flight
+  const scars = [];      // impact marks left on the boundary
+  let ripple = 0, rippleColor = "#57C6E8", pulse = 0, agentTone = "#57C6E8";
+  let vesselGlow = 0;
+
+  function fit(){
+    const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    cv.width = r.width * d; cv.height = r.height * d;
+    cx.setTransform(d, 0, 0, d, 0, 0);
+    W = r.width; H = r.height;
+    cxp = W * 0.30; cyp = H / 2;
+    gateR = Math.min(W * 0.34, H * 0.42);
+    agentR = Math.max(16, gateR * 0.15);
+  }
+
+  function fire(f){
+    // One command becomes one projectile, aimed outward from the agent.
+    const spread = 0.85;
+    const angle = (Math.random() - 0.5) * spread * 2;
+    shots.push({
+      a: angle, r: agentR + 6, v: gateR / 78,
+      verdict: f.verdict, dead: false, life: 1, label: SAYS[f.request.command] || "",
+    });
+  }
+
+  function draw(){
+    cx.clearRect(0, 0, W, H);
+
+    // the vessel: what the agent is trying to reach
+    const vx = Math.min(W - 54, cxp + gateR * 1.85), vy = cyp;
+    vesselGlow = Math.max(0, vesselGlow - 0.02);
+    cx.beginPath(); cx.arc(vx, vy, 26 + vesselGlow * 12, 0, Math.PI * 2);
+    cx.fillStyle = `rgba(87,198,232,${.04 + vesselGlow * .1})`; cx.fill();
+    cx.beginPath(); cx.arc(vx, vy, 17, 0, Math.PI * 2);
+    cx.strokeStyle = `rgba(87,198,232,${.35 + vesselGlow * .5})`; cx.lineWidth = 1.5; cx.stroke();
+    cx.fillStyle = "rgba(87,198,232,.75)"; cx.font = '600 9px "IBM Plex Mono", monospace';
+    cx.textAlign = "center"; cx.fillText("VESSEL", vx, vy + 3); cx.textAlign = "left";
+
+    // containment boundary -- a wall, not a hairline
+    const segs = 96;
+    cx.save();
+    cx.shadowBlur = guarded ? 14 : 0;
+    cx.shadowColor = guarded ? "rgba(87,198,232,.55)" : "transparent";
+    for (let i = 0; i < segs; i++){
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + .6) / segs) * Math.PI * 2;
+      cx.beginPath(); cx.arc(cxp, cyp, gateR, a0, a1);
+      cx.strokeStyle = guarded ? "rgba(87,198,232,.7)" : "rgba(232,69,95,.28)";
+      cx.lineWidth = guarded ? 2.6 : 1.6; cx.stroke();
+    }
+    cx.restore();
+    if (!guarded){
+      cx.setLineDash([6, 9]);
+      cx.beginPath(); cx.arc(cxp, cyp, gateR, 0, Math.PI * 2);
+      cx.strokeStyle = "rgba(232,69,95,.5)"; cx.lineWidth = 1; cx.stroke();
+      cx.setLineDash([]);
+    }
+    // impact ripple
+    if (ripple > 0){
+      cx.beginPath(); cx.arc(cxp, cyp, gateR + (1 - ripple) * 26, 0, Math.PI * 2);
+      cx.strokeStyle = rippleColor.replace(")", `,${ripple * .55})`).replace("#", "rgba(")
+        .length ? `rgba(${hex(rippleColor)},${ripple * .55})` : rippleColor;
+      cx.lineWidth = 2.5; cx.stroke();
+      ripple -= 0.02;
+    }
+    // scars from blocked commands
+    scars.forEach(s => {
+      cx.beginPath();
+      cx.arc(cxp, cyp, gateR, s.a - .045, s.a + .045);
+      cx.strokeStyle = `rgba(232,69,95,${s.life * .8})`; cx.lineWidth = 4; cx.stroke();
+      s.life -= 0.0016;
+    });
+    for (let i = scars.length - 1; i >= 0; i--) if (scars[i].life <= 0) scars.splice(i, 1);
+
+    // agent core
+    pulse = (pulse + 0.035) % (Math.PI * 2);
+    const glow = 1 + Math.sin(pulse) * 0.12;
+    cx.beginPath(); cx.arc(cxp, cyp, agentR * 1.55 * glow, 0, Math.PI * 2);
+    cx.fillStyle = `rgba(${hex(agentTone)},.07)`; cx.fill();
+    cx.beginPath(); cx.arc(cxp, cyp, agentR, 0, Math.PI * 2);
+    cx.fillStyle = `rgba(${hex(agentTone)},.16)`; cx.fill();
+    cx.strokeStyle = agentTone; cx.lineWidth = 1.5; cx.stroke();
+    cx.fillStyle = agentTone; cx.font = '600 10px "IBM Plex Mono", monospace';
+    cx.textAlign = "center"; cx.fillText("AGENT", cxp, cyp + 3.5);
+    cx.textAlign = "left";
+
+    // projectiles
+    for (let i = shots.length - 1; i >= 0; i--){
+      const s = shots[i];
+      s.r += s.v;
+      const x = cxp + Math.cos(s.a) * s.r, y = cyp + Math.sin(s.a) * s.r;
+      const col = COLOR[s.verdict];
+
+      if (!s.dead && s.verdict === "CONTAIN" && guarded && s.r >= gateR){
+        s.dead = true; s.r = gateR;
+        scars.push({a: s.a, life: 1});
+        ripple = 1; rippleColor = col;
+      }
+      if (s.dead){
+        s.life -= 0.05;
+        cx.beginPath();
+        cx.arc(cxp + Math.cos(s.a) * gateR, cyp + Math.sin(s.a) * gateR,
+               3 + (1 - s.life) * 13, 0, Math.PI * 2);
+        cx.strokeStyle = `rgba(${hex(col)},${s.life})`; cx.lineWidth = 2; cx.stroke();
+        if (s.life <= 0) shots.splice(i, 1);
+        continue;
+      }
+      // trail
+      const tail = 24;
+      cx.beginPath();
+      cx.moveTo(cxp + Math.cos(s.a) * Math.max(agentR, s.r - tail),
+                cyp + Math.sin(s.a) * Math.max(agentR, s.r - tail));
+      cx.lineTo(x, y);
+      cx.strokeStyle = `rgba(${hex(col)},.34)`; cx.lineWidth = 1.5; cx.stroke();
+      cx.beginPath(); cx.arc(x, y, 3.4, 0, Math.PI * 2);
+      cx.fillStyle = col; cx.fill();
+
+      if (s.r > gateR && s.r < gateR + 10 && !s.rippled){
+        s.rippled = true; ripple = 1; rippleColor = col;
+      }
+      if (s.r > gateR * 1.7 && !s.landed){ s.landed = true; vesselGlow = 1; }
+      if (s.r > Math.max(W, H)) shots.splice(i, 1);
+    }
+    requestAnimationFrame(draw);
+  }
+
+  function hex(h){
+    const n = parseInt(h.slice(1), 16);
+    return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+  }
+
+  // ---------- data ----------
+  async function boot(){
+    scene = await (await fetch("/scene")).json();
+    $("cInf").textContent = scene.inference;
+    $("cBase").textContent = scene.baseline;
+    setShield(scene.guarded);
+    fit(); draw(); listen();
+  }
+
+  function setShield(on){
+    guarded = on;
+    $("shield").classList.toggle("down", !on);
+    $("shield").setAttribute("aria-pressed", String(on));
+    $("shieldTxt").textContent = on ? "SANDBOX ON" : "SANDBOX OFF";
+    $("ovGate").textContent = on ? "SANDBOX BOUNDARY" : "BOUNDARY DOWN";
+  }
+
+  $("shield").addEventListener("click", async () => {
+    const next = !guarded;
+    setShield(next);
+    await fetch("/control", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({action:"guard", value: next})});
+  });
+  document.querySelectorAll("[data-b]").forEach(b => b.addEventListener("click", async () => {
+    document.querySelectorAll("[data-b]").forEach(x => x.classList.remove("sel"));
+    b.classList.add("sel");
+    await fetch("/control", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({action:"behavior", value: b.dataset.b})});
+  }));
+
+  function listen(){
+    const es = new EventSource("/stream");
+    es.onmessage = e => render(JSON.parse(e.data));
+    es.onerror = () => { $("caseNote").textContent = "stream lost"; };
+  }
+
+  function argOf(v){
+    if (v === null || v === undefined || typeof v === "boolean") return "";
+    if (typeof v === "object") return " " + (v.waypoint_id ?? "");
+    return " " + v;
+  }
+
+  function render(f){
+    setShield(f.guarded);
+    const v = f.verdict, t = scene.thresholds;
+    agentTone = {COMPLIANT:"#3DD68C", DRIFTING:"#E8A93D", FAULTY:"#E8455F"}[f.agent.behavior] || "#57C6E8";
+    fire(f);
+
+    $("coAgent").textContent = AGENTS[f.agent.persona] || f.agent.persona;
+    const tag = $("coTag"); tag.textContent = f.agent.behavior;
+    tag.className = "co-tag " + f.agent.behavior;
+    $("coCmd").textContent = (SAYS[f.request.command] || f.request.command) + argOf(f.request.value);
+    const cv2 = $("coVerdict"); cv2.textContent = f.escaped ? "ESCAPED" : LABEL[v];
+    cv2.className = "co-verdict " + (f.escaped ? "REVIEW" : v);
+    $("coWhy").textContent = WHY[f.failure_mode] || "";
+    $("callout").className = "callout " + v;
+    $("cLat").textContent = f.latency_ms.toFixed(0) + " ms";
+    $("ovCount").textContent = `${f.scoreboard.blocked} BLOCKED · ${f.scoreboard.escaped} ESCAPED`;
+
+    const u = f.unit;
+    const set = (id, txt, cls) => { const e = $(id); e.textContent = txt; e.className = "v " + (cls||""); };
+    set("uSpeed", u.speed_kts.toFixed(1) + " kts", u.speed_kts > t.speed_ceiling_kts ? "bad" : "");
+    set("uCourse", u.course_deg.toFixed(0) + "°");
+    set("uEmcon", u.emcon);
+    set("uRadar", u.radar_kw.toFixed(1) + " kW", u.radar_kw > 0 ? "bad" : "");
+    set("uAis", u.ais ? "ON" : "off", u.ais ? "bad" : "");
+    set("uDev", u.deviation_m.toFixed(0) + " m",
+        u.deviation_m > t.corridor_hazard_m ? "bad" : u.deviation_m > t.corridor_warning_m ? "warn" : "");
+    const st = $("uState");
+    st.className = "vstate" + (u.in_violation ? " bad" : "");
+    st.textContent = u.in_violation ? "Out of bounds" : "Within limits";
+
+    const s = f.scoreboard, tot = Math.max(1, s.attempts);
+    $("sAtt").textContent = s.attempts; $("sAllow").textContent = s.allowed;
+    $("sFlag").textContent = s.flagged; $("sBlock").textContent = s.blocked;
+    $("sEsc").textContent = s.escaped;
+    $("barPass").style.width = (s.allowed / tot * 100) + "%";
+    $("barFlag").style.width = (s.flagged / tot * 100) + "%";
+    $("barBlock").style.width = (s.blocked / tot * 100) + "%";
+
+    const gate = f.checks.doctrine_fired ? "Rule" : f.checks.behaviour_fired ? "Behaviour" : "—";
+    const tr = document.createElement("tr");
+    tr.className = "new";
+    tr.innerHTML =
+      `<td class="step">${f.step}</td>`
+      + `<td class="cmd">${(SAYS[f.request.command] || f.request.command) + argOf(f.request.value)}</td>`
+      + `<td class="verdict ${v}">${f.escaped ? '<span class="esc">ESCAPED</span>' : LABEL[v]}</td>`
+      + `<td class="gate">${f.checks.doctrine_fired ? (f.checks.doctrine || "Rule") : gate}</td>`
+      + `<td class="why">${WHY[f.failure_mode] || ""} <span style="color:var(--faint)">`
+      + `risk ${f.risk.toFixed(2)} · ${f.latency_ms.toFixed(0)}ms</span></td>`;
+    const body = $("caseBody");
+    body.prepend(tr);
+    while (body.childElementCount > 80) body.lastElementChild.remove();
+  }
+
+  window.addEventListener("resize", fit);
+  boot().catch(e => { $("coCmd").textContent = "Cannot reach the harness"; $("coWhy").textContent = e.message; });
+})();
+</script>
+</body>
+</html>

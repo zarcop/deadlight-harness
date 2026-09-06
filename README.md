@@ -72,33 +72,47 @@ reaches the actuators.
 
 ## Quick start
 
+Create a virtual environment and install into it:
+
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+```
+
+**Use `.venv/bin/python` for every command below.** A bare `python` on macOS
+usually resolves to conda's base environment or the system interpreter, neither
+of which has these dependencies — the symptom is
+`ModuleNotFoundError: No module named 'fastembed'`. Either use the explicit path
+shown throughout, or activate the environment first:
+
+```bash
+source .venv/bin/activate
 ```
 
 Stage the embedding model once, on a host that still has network. This is the
 only step that ever reaches the internet:
 
 ```bash
-python edge_embedding.py --stage
+.venv/bin/python edge_embedding.py --stage
 ```
+
+It lands in `~/.cache/edge_embedding` and every command reuses it afterwards.
 
 Then run any module directly — each has a self-contained demonstration:
 
 ```bash
-python tactical_telemetry.py
+.venv/bin/python tactical_telemetry.py
 ```
 
 ```bash
-python edge_embedding.py
+.venv/bin/python edge_embedding.py
 ```
 
 ```bash
-python policy_engine.py
+.venv/bin/python policy_engine.py
 ```
 
 ```bash
-python latent_projector.py
+.venv/bin/python latent_projector.py
 ```
 
 `policy_engine.py` and `latent_projector.py` run the whole pipeline end to end:
@@ -109,22 +123,92 @@ To prove the harness contains a misbehaving agent — the same agent and seed ru
 once guarded and once unguarded:
 
 ```bash
-python agent_harness_bridge.py --steps 18
+.venv/bin/python agent_harness_bridge.py --steps 18
 ```
 
 Add `--backend anthropic` to drive it with Claude instead of the offline brain
 (needs `ANTHROPIC_API_KEY`, read from the environment or a local `.env`).
 
-For the live dashboard:
+### Recording a demo
+
+One command brings up everything and refuses to open the browser until the
+server is genuinely serving — a demo should never start on a stack trace:
 
 ```bash
-python main_harness.py
+./demo.sh
 ```
 
-Then open <http://127.0.0.1:8787>. The unit patrols nominally; the buttons inject
-rogue orders — activate the radar under EMCON, sprint past the speed ceiling,
-depart the corridor — and you watch them get contained in real time. **Turn the
-network off while it runs; nothing changes.** That is the demo.
+It creates the venv if missing, installs dependencies, stages the model if it
+isn't cached, reclaims the port from a previous run, waits for the ready banner,
+opens the browser, and prints a suggested 90-second shot list. Ctrl-C stops it
+and releases the port.
+
+| Flag | Effect |
+| --- | --- |
+| `--claude` | Drive the agent with Claude (falls back to offline if no key) |
+| `--harness` | Launch the watchstander dashboard instead |
+| `--check` | Run preflight only, start nothing |
+| `--interval N` | Seconds between agent commands (default 2.2) |
+| `--no-open` | Don't open the browser |
+
+Run `./demo.sh --check` before you start recording. It verifies the interpreter,
+dependencies, model cache, inference credentials, and port in a couple of
+seconds, so any surprise happens off camera.
+
+### The two dashboards
+
+There are two, and they answer different questions. Both are stdlib-only servers
+with a single static page — no framework, no build step.
+
+**Agent containment console** — *does the harness stop a misbehaving agent?*
+This is the one to demo.
+
+```bash
+.venv/bin/python agent_console.py
+```
+
+Open <http://127.0.0.1:8788>. An agent sits inside the sandbox boundary and fires
+commands outward; each one is stopped at the wall or passes through to the
+vessel. Below the arena are the running analytics and a test-case table giving
+the reasoning behind every decision.
+
+**Drop the shield mid-demo.** The toggle in the header disables the sandbox and
+restarts the run. The same agent — same brain, same persona — starts getting
+its commands through, and the vessel walks into the states it was being kept out
+of. Raise it and containment resumes. Nothing about the agent changes; only
+whether anything is standing in front of it.
+
+`--backend anthropic` drives it with Claude. `--start-unguarded` opens with the
+shield already down. `--interval` sets the seconds between commands (default 2.2,
+slow enough to read a verdict before the next arrives).
+
+**Watchstander dashboard** — *what is the vessel doing right now?*
+
+```bash
+.venv/bin/python main_harness.py
+```
+
+Open <http://127.0.0.1:8787>. A corridor plot with the unit's track, a verdict
+feed, and buttons that inject rogue orders directly into the telemetry.
+**Turn the network off while it runs; nothing changes.**
+
+### Running both at once
+
+They use different ports (8787 and 8788), so they coexist:
+
+```bash
+(trap 'kill 0' INT; .venv/bin/python main_harness.py & .venv/bin/python agent_console.py & wait)
+```
+
+The `trap` matters: with a plain `a & b` only the first job is backgrounded, so
+Ctrl-C leaves the other running and holding its port. This form stops both.
+
+Two caveats, both measured. Each process loads its own ONNX session, so peak
+memory roughly doubles to **~760 MB**. And they compete for the same performance
+cores: under contention the embedder's own self-test dropped from 21/21 to 19/21
+purely on latency. For a presentation, run **one at a time** — the agent console
+is the stronger demo. Use `--no-keepalive` on `main_harness.py` if you must run
+both and latency matters less than memory.
 
 To point a deployed node at a staged model directory:
 
@@ -143,7 +227,9 @@ export EDGE_EMBED_CACHE=/path/to/models
 | `policy_engine.py` | FAISS `IndexFlatIP` baseline, τ calibration, dual-layer evaluator |
 | `latent_projector.py` | Fit-once PCA to `(x, y, z)`, bounding envelope, JSON/WebSocket payloads |
 | `main_harness.py` | The intercept loop plus a stdlib-only SSE server and command injection |
-| `ui/dashboard.html` | Live watchstander dashboard: corridor view, verdict feed, layer panel |
+| `ui/dashboard.html` | Watchstander dashboard: corridor view, verdict feed, layer panel |
+| `agent_console.py` | Live agent-vs-sandbox server with a shield toggle (port 8788) |
+| `ui/agent_console.html` | Containment arena, analytics, and the test-case ledger |
 
 Agent layer:
 
@@ -369,7 +455,7 @@ silently downloading. To prove it, run the suite with the model hub pointed at a
 dead port:
 
 ```bash
-HF_ENDPOINT=http://127.0.0.1:9 HF_HUB_OFFLINE=1 python edge_embedding.py
+HF_ENDPOINT=http://127.0.0.1:9 HF_HUB_OFFLINE=1 .venv/bin/python edge_embedding.py
 ```
 
 Note that fastembed caches models under their *source* repository name, so
