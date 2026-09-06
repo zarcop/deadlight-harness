@@ -26,6 +26,11 @@ faiss-cpu>=1.8,<2.0
 # PCA projection -- latent_projector.py
 scikit-learn>=1.4,<2.0
 
+# Claude inference for the mock navy agent -- agent_brain.py
+# Optional at runtime: the agent falls back to its deterministic offline brain
+# when ANTHROPIC_API_KEY is unset, which is the DDIL default.
+anthropic>=1.0,<2.0
+
 # Convex hull for the UI envelope mesh -- latent_projector.py
 # Arrives with scikit-learn, but declared because the code imports it directly.
 scipy>=1.11,<2.0

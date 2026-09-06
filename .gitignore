@@ -5,3 +5,8 @@ data/processed/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Local credentials -- never commit
+.env
+.env.*
+!.env.example

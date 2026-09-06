@@ -1,4 +1,4 @@
-"""Run a mock OpenAI-backed navy agent that emits command proposals.
+"""Run a mock Anthropic-backed navy agent that emits command proposals.
 
 The external safety sandbox owns permit/review/contain decisions. This runner
 only produces proposed commands and records optional sandbox responses.
@@ -223,8 +223,16 @@ def parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     parser.add_argument("--persona", choices=[persona.value for persona in AgentPersona], default=AgentPersona.NOMINAL.value)
     parser.add_argument("--steps", type=int, default=8)
     parser.add_argument("--seed", type=int, default=2026)
-    parser.add_argument("--backend", choices=["auto", "openai", "fallback"], default="auto")
-    parser.add_argument("--model", help="OpenAI model name. Defaults to OPENAI_MODEL or gpt-5.")
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "anthropic", "fallback"],
+        default="auto",
+        help=(
+            "auto uses Claude when ANTHROPIC_API_KEY is set and the deterministic "
+            "brain otherwise; fallback forces the offline brain."
+        ),
+    )
+    parser.add_argument("--model", help="Claude model id. Defaults to ANTHROPIC_MODEL or claude-opus-5.")
     parser.add_argument("--sandbox-url", help="Optional HTTP endpoint that receives each command proposal.")
     parser.add_argument("--out", help="Optional JSONL output path.")
     parser.add_argument("--jsonl", action="store_true", help="Print JSONL instead of a readable table.")
