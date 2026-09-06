@@ -76,6 +76,17 @@ python latent_projector.py
 20 nominal patrol steps, an EMCON breach, then a navigation divergence, printing
 live verdicts.
 
+For the live dashboard:
+
+```bash
+python main_harness.py
+```
+
+Then open <http://127.0.0.1:8787>. The unit patrols nominally; the buttons inject
+rogue orders — activate the radar under EMCON, sprint past the speed ceiling,
+depart the corridor — and you watch them get contained in real time. **Turn the
+network off while it runs; nothing changes.** That is the demo.
+
 To point a deployed node at a staged model directory:
 
 ```bash
@@ -92,6 +103,8 @@ export EDGE_EMBED_CACHE=/path/to/models
 | `edge_embedding.py` | Air-gapped ONNX embedder with a latency budget and staging CLI |
 | `policy_engine.py` | FAISS `IndexFlatIP` baseline, τ calibration, dual-layer evaluator |
 | `latent_projector.py` | Fit-once PCA to `(x, y, z)`, bounding envelope, JSON/WebSocket payloads |
+| `main_harness.py` | The intercept loop plus a stdlib-only SSE server and command injection |
+| `ui/dashboard.html` | Live watchstander dashboard: corridor view, verdict feed, layer panel |
 
 ### Verdict contract
 
@@ -120,10 +133,32 @@ On a 10-core Apple M-series host, Python 3.11, all values median unless noted:
 
 | Stage | Latency | Notes |
 | --- | --- | --- |
-| Embedding | 8.09 ms (p95 9.03 ms) | MiniLM-L6, ONNX threads pinned to 6 performance cores |
+| Embedding | 8.05 ms (p95 8.94 ms) | MiniLM-L6, ONNX threads pinned to 6 performance cores |
 | Policy evaluation | 0.058 ms (p95 0.107 ms) | FAISS exhaustive search over 300×384 |
 | Projection | 0.048 ms | PCA `transform` only |
 | **Total intercept** | **~8.2 ms** | against the 10 ms target |
+
+**Those are tight-loop numbers, and a tight loop is not how the harness runs.**
+ONNX Runtime parks its worker threads when idle, and waking them costs more than
+the inference. At a realistic frame interval the same embedding takes far longer:
+
+| frame interval | embedding p50 |
+| --- | --- |
+| tight loop | 8.2 ms |
+| every 0.2 s | 19.8 ms |
+| every 0.6 s | 19.3 ms |
+| every 1.0 s | 18.7 ms |
+
+A 2.4× penalty that no benchmark loop reveals, because a benchmark loop never
+lets the pool go cold. The gap size barely matters — 0.2 s already costs the
+full penalty — so this is thread-pool parking, not CPU frequency scaling.
+
+`EdgeEmbedder.start_keepalive()` holds the pool open with a trivial inference
+every 50 ms and recovers most of it: **21.0 ms → 10.1 ms p50** (p95 15.9 ms).
+`main_harness.py` enables it by default and prints that it is on; disable with
+`--no-keepalive`. The cost is a core held warm continuously, which is a poor
+trade on a battery-powered hull when nobody is watching the screen — so it is
+opt-out for the demo and should be opt-in for an unattended patrol.
 
 Baseline calibration (300 windows, embed + index + τ) takes ~2.1 s at startup.
 
