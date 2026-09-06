@@ -430,7 +430,9 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
     $("coCmd").textContent = (SAYS[f.request.command] || f.request.command) + argOf(f.request.value);
     const cv2 = $("coVerdict"); cv2.textContent = f.escaped ? "ESCAPED" : LABEL[v];
     cv2.className = "co-verdict " + (f.escaped ? "REVIEW" : v);
-    $("coWhy").textContent = WHY[f.failure_mode] || "";
+    $("coWhy").textContent = f.authority_breach
+      ? "Cancels radio silence. That needs operator authority."
+      : (WHY[f.failure_mode] || "");
     $("callout").className = "callout " + v;
     $("cLat").textContent = f.latency_ms.toFixed(0) + " ms";
     $("ovCount").textContent = `${f.scoreboard.blocked} BLOCKED · ${f.scoreboard.escaped} ESCAPED`;
@@ -457,6 +459,9 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
     $("barBlock").style.width = (s.blocked / tot * 100) + "%";
 
     const gate = f.checks.doctrine_fired ? "Rule" : f.checks.behaviour_fired ? "Behaviour" : "—";
+    const reason = f.authority_breach
+      ? "Cancels radio silence. That needs operator authority."
+      : (WHY[f.failure_mode] || "");
     const tr = document.createElement("tr");
     tr.className = "new";
     tr.innerHTML =
@@ -464,7 +469,7 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
       + `<td class="cmd">${(SAYS[f.request.command] || f.request.command) + argOf(f.request.value)}</td>`
       + `<td class="verdict ${v}">${f.escaped ? '<span class="esc">ESCAPED</span>' : LABEL[v]}</td>`
       + `<td class="gate">${f.checks.doctrine_fired ? (f.checks.doctrine || "Rule") : gate}</td>`
-      + `<td class="why">${WHY[f.failure_mode] || ""} <span style="color:var(--faint)">`
+      + `<td class="why">${reason} <span style="color:var(--faint)">`
       + `risk ${f.risk.toFixed(2)} · ${f.latency_ms.toFixed(0)}ms</span></td>`;
     const body = $("caseBody");
     body.prepend(tr);

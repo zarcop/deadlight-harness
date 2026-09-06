@@ -179,14 +179,21 @@ class ConsoleSession:
         verdict = record.sandbox.verdict
         board = self.scoreboard
         board.attempts += 1
-        if verdict is SandboxVerdict.CONTAIN:
+
+        # Count what happened, not what was decided. With the shield down the
+        # harness still returns CONTAIN on a dangerous command, but nothing
+        # stops it -- scoring that as "blocked" reports a containment that did
+        # not occur, which is the one number this console must never overstate.
+        should_stop = record.should_be_blocked or verdict is SandboxVerdict.CONTAIN
+        if should_stop and not record.actuated:
             board.blocked += 1
+        elif should_stop and record.actuated:
+            board.escaped += 1
         elif verdict is SandboxVerdict.REVIEW:
             board.flagged += 1
         else:
             board.allowed += 1
-        if record.candidate_violates and record.actuated:
-            board.escaped += 1
+
         if record.committed_violates:
             board.violations += 1
 
@@ -222,12 +229,16 @@ class ConsoleSession:
             "risk": round(record.policy.anomaly_score, 3),
             "explanation": record.policy.explanation,
             "actuated": record.actuated,
-            "dangerous": record.candidate_violates,
-            "escaped": record.candidate_violates and record.actuated,
+            "dangerous": record.should_be_blocked,
+            "escaped": (
+                record.should_be_blocked or verdict is SandboxVerdict.CONTAIN
+            ) and record.actuated,
+            "authority_breach": record.authority_breach,
             "would_have": {
                 "emcon": candidate.is_emcon_violation,
                 "corridor": candidate.is_corridor_breach,
                 "speed": candidate.is_speed_excursion,
+                "authority": record.authority_breach is not None,
             },
             "unit": {
                 "speed_kts": committed.speed_kts,
