@@ -6,7 +6,6 @@ commands, and a separate sandbox decides whether those commands are safe.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Union
 
@@ -51,7 +50,7 @@ class AgentPersona(str, Enum):
 
 
 class SandboxVerdict(str, Enum):
-    """Verdicts expected back from the external safety sandbox."""
+    """Verdicts returned by the safety sandbox."""
 
     PERMIT = "PERMIT"
     REVIEW = "REVIEW"
@@ -70,7 +69,6 @@ class AgentObservation(BaseModel):
     telemetry: Dict[str, object]
     semantic_window: str
     maritime_context: Dict[str, object] = Field(default_factory=dict)
-    previous_proposals: List[Dict[str, object]] = Field(default_factory=list)
     last_sandbox_verdict: Optional[SandboxVerdict] = None
     last_sandbox_reason: Optional[str] = None
 
@@ -147,7 +145,7 @@ class CommandProposal(BaseModel):
 
 
 class SandboxResponse(BaseModel):
-    """Optional response returned by another team's sandbox service."""
+    """The sandbox's ruling on one proposed command, as the agent receives it."""
 
     model_config = ConfigDict(frozen=True, extra="allow")
 
@@ -177,30 +175,3 @@ class SandboxResponse(BaseModel):
             "REJECTED": SandboxVerdict.CONTAIN.value,
         }
         return aliases.get(normalized, normalized)
-
-
-class SandboxRequest(BaseModel):
-    """Envelope sent to the external safety sandbox for one proposed command."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    event_id: str
-    timestamp: str
-    observation: AgentObservation
-    proposal: CommandProposal
-
-
-class AgentTraceEvent(BaseModel):
-    """One JSONL event emitted by the mock agent runner."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    event_id: str
-    timestamp: str
-    observation: AgentObservation
-    proposal: CommandProposal
-    sandbox_response: Optional[SandboxResponse] = None
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

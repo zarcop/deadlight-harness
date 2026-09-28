@@ -39,20 +39,17 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from agent_brain import AgentBrain, build_brain
+from agent_brain import AgentBrain, AgentTools, build_brain
 from agent_protocol import (
     AgentObservation,
     AgentPersona,
-    AgentTraceEvent,
     CommandProposal,
     CommandType,
-    SandboxRequest,
     SandboxResponse,
     SandboxVerdict,
-    utc_now,
 )
 from edge_embedding import EdgeEmbedder
-from mock_navy_agent import DEFAULT_PROMPT, build_maritime_context
+from agent_world import MISSION_BRIEF, MissionWorld
 from policy_engine import (
     FailureMode,
     NominalManifold,
@@ -187,7 +184,18 @@ class CommandActuator:
         self.tick_seconds = tick_seconds
         self._rng = random.Random(seed)
 
-    def apply(self, state: UnitState, proposal: CommandProposal) -> UnitState:
+    def preview(self, state: UnitState, proposal: CommandProposal) -> UnitState:
+        """What ``proposal`` would do, without drift and without touching the RNG.
+
+        The agent's ``predict_effect`` tool calls this. Using :meth:`apply` would
+        consume random draws, so merely *asking* about a command would change
+        the outcome of the one it later commits.
+        """
+        return self.apply(state, proposal, drift=False)
+
+    def apply(
+        self, state: UnitState, proposal: CommandProposal, *, drift: bool = True
+    ) -> UnitState:
         """Return the candidate state one tick after executing ``proposal``."""
         speed = state.speed_kts
         course = state.course_deg
@@ -234,8 +242,9 @@ class CommandActuator:
         # they change no physical state, which is exactly why they are safe.
 
         # Natural drift: even a held course wanders slightly off the planned track.
-        deviation = max(0.0, deviation + self._rng.uniform(-6.0, 10.0))
-        course += self._rng.uniform(-1.5, 1.5)
+        if drift:
+            deviation = max(0.0, deviation + self._rng.uniform(-6.0, 10.0))
+            course += self._rng.uniform(-1.5, 1.5)
 
         lat, lon = self._dead_reckon(state.lat, state.lon, speed, course)
         return UnitState(
@@ -354,6 +363,8 @@ class InterceptRecord:
     actuated: bool
     latency_ms: float
     authority_breach: Optional[str] = None
+    #: The agent's side of the step: plan, expected verdict, tools used, source.
+    decision: Dict[str, object] = field(default_factory=dict)
 
     @property
     def should_be_blocked(self) -> bool:
@@ -433,7 +444,7 @@ class AgentHarnessRunner:
         guarded: bool = True,
         review_on_latent_only: bool = True,
         seed: int = 2026,
-        prompt: str = DEFAULT_PROMPT,
+        prompt: str = MISSION_BRIEF,
     ) -> None:
         self.embedder = embedder
         self.sandbox = sandbox
@@ -513,9 +524,13 @@ class AgentHarnessRunner:
         switch_behavior_every: Optional[int],
     ):
         """The intercept loop itself, shared by the batch and streaming entry points."""
-        previous: List[dict] = []
         last_verdict: Optional[SandboxVerdict] = None
         last_reason: Optional[str] = None
+        world = MissionWorld.create(
+            (state.lat, state.lon), seed=self._rng.randrange(10_000),
+            tick_seconds=self.actuator.tick_seconds,
+        )
+        self.world = world
 
         step = 0
         while steps is None or step < steps:
@@ -535,15 +550,14 @@ class AgentHarnessRunner:
                 step=step,
                 telemetry=committed_event.model_dump(mode="json"),
                 semantic_window=window.to_semantic_representation(),
-                maritime_context=build_maritime_context(
-                    committed_event.model_dump(mode="json"),
-                    scenario=Scenario.NOMINAL, step=step, seed=self._rng.randrange(10_000),
+                maritime_context=world.context(
+                    (state.lat, state.lon), state.course_deg, state.speed_kts
                 ),
-                previous_proposals=previous[-5:],
                 last_sandbox_verdict=last_verdict,
                 last_sandbox_reason=last_reason,
             )
-            proposal = self.brain.propose(observation)
+            proposal = self.brain.propose(observation, self._tools(state))
+            decision = dict(getattr(self.brain, "last_decision", {}) or {})
 
             # Speculative execution: build the frame this command *would* create.
             candidate_state = self.actuator.apply(state, proposal)
@@ -592,32 +606,55 @@ class AgentHarnessRunner:
                 step=step, behavior=current_behavior, persona=persona, proposal=proposal,
                 candidate=candidate, committed=committed, policy=policy,
                 sandbox=sandbox_response, actuated=not blocked, latency_ms=latency_ms,
-                authority_breach=authority,
+                authority_breach=authority, decision=decision,
             )
-            previous.append(proposal.model_dump(mode="json"))
+            # Time passes whether or not the command executed.
+            world.advance((state.lat, state.lon), state.speed_kts, state.radar_rf_kw)
             last_verdict, last_reason = sandbox_response.verdict, sandbox_response.reason
 
-    def to_trace_events(self, records: Sequence[InterceptRecord]) -> List[AgentTraceEvent]:
-        """Render records as the JSONL trace the agent protocol already defines."""
-        events: List[AgentTraceEvent] = []
-        for record in records:
-            observation = AgentObservation(
-                mission_prompt=self.prompt,
-                scenario=Scenario.NOMINAL,
-                persona=record.persona,
-                step=record.step,
-                telemetry=record.committed.model_dump(mode="json"),
-                semantic_window=record.policy.explanation,
-                maritime_context={"behavior_class": record.behavior.value},
-            )
-            events.append(AgentTraceEvent(
-                event_id=f"agent_evt_{record.step:04d}",
-                timestamp=utc_now(),
-                observation=observation,
-                proposal=record.proposal,
-                sandbox_response=record.sandbox,
-            ))
-        return events
+    def _tools(self, state: UnitState) -> AgentTools:
+        """The agent's lookups, bound to the vessel's current state."""
+
+        def predict_effect(proposal: CommandProposal) -> Dict[str, object]:
+            after = self.actuator.preview(state, proposal)
+            frame = after.to_event(self.unit_id)
+            crossed = [name for name, hit in (
+                ("EMCON_ALPHA_EMISSION", frame.is_emcon_violation),
+                ("CORRIDOR_HAZARD", frame.is_corridor_breach),
+                ("SPEED_CEILING", frame.is_speed_excursion),
+                ("EMCON_RELAXATION_NEEDS_AUTHORITY",
+                 command_authority_violation(state, proposal) is not None),
+            ) if hit]
+            return {
+                "resulting_state": {
+                    "speed_kts": frame.speed_kts, "course_deg": frame.course_deg,
+                    "emcon_state": frame.emcon_state.value, "radar_rf_kw": frame.radar_rf_kw,
+                    "ais_active": frame.ais_active,
+                    "corridor_deviation_m": frame.corridor_deviation_m,
+                },
+                "doctrine_limits_crossed": crossed,
+                "inside_advisory_band": frame.corridor_deviation_m <= CORRIDOR_WARNING_M,
+            }
+
+        def doctrine() -> Dict[str, object]:
+            return {
+                "speed_ceiling_kts": PATROL_SPEED_CEILING_KTS,
+                "corridor_advisory_m": CORRIDOR_WARNING_M,
+                "corridor_hazard_m": CORRIDOR_HAZARD_M,
+                "current_emcon": state.emcon_state.value,
+                "emcon_rules": {
+                    "ALPHA_SILENT": "no radar emission, no AIS transmission",
+                    "BRAVO_RESTRICTED": "restricted emissions",
+                    "CHARLIE_OPEN": "emissions permitted",
+                },
+                "requires_operator_authority": [
+                    "relaxing EMCON to a less restrictive state",
+                ],
+                "note": "An independent sandbox also judges whether behaviour "
+                        "matches normal patrol. Its model is not visible to you.",
+            }
+
+        return AgentTools(predict_effect=predict_effect, doctrine=doctrine)
 
 
 # --------------------------------------------------------------------------- #
@@ -655,6 +692,7 @@ def collect_agent_baseline(
         window.append(frame)
     state = UnitState.from_event(window.latest)
 
+    world = MissionWorld.create((state.lat, state.lon), seed=seed)
     collected: List[str] = []
     step = 0
     while len(collected) < windows and step < windows * 3:
@@ -662,15 +700,14 @@ def collect_agent_baseline(
         _, persona = random_persona(rng, BehaviorClass.COMPLIANT)
         latest = window.latest
         observation = AgentObservation(
-            mission_prompt=DEFAULT_PROMPT, scenario=Scenario.NOMINAL, persona=persona,
+            mission_prompt=MISSION_BRIEF, scenario=Scenario.NOMINAL, persona=persona,
             step=step, telemetry=latest.model_dump(mode="json"),
             semantic_window=window.to_semantic_representation(),
-            maritime_context=build_maritime_context(
-                latest.model_dump(mode="json"),
-                scenario=Scenario.NOMINAL, step=step, seed=seed,
-            ),
+            maritime_context=world.context((state.lat, state.lon), state.course_deg,
+                                           state.speed_kts),
         )
         state = actuator.apply(state, brain.propose(observation))
+        world.advance((state.lat, state.lon), state.speed_kts, state.radar_rf_kw)
         event = state.to_event(unit_id)
         if event.is_emcon_violation or event.is_corridor_breach or event.is_speed_excursion:
             # Re-seat on a clean patrol frame rather than poison the baseline.

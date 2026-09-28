@@ -69,7 +69,22 @@ h1{font-family:var(--cond);font-weight:700;font-size:24px;letter-spacing:.07em;m
             letter-spacing:.05em}
 .co-verdict.PERMIT{color:var(--pass)} .co-verdict.REVIEW{color:var(--flag)}
 .co-verdict.CONTAIN{color:var(--block)}
+.co-verdict.deliberating{color:var(--ice);font-size:12px;letter-spacing:.14em;
+  animation:breathe 1.4s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.35}}
 .co-why{font-size:12px;color:var(--dim);margin-top:5px;line-height:1.45}
+.co-plan{font-size:11.5px;color:var(--ink);margin-top:7px;padding-top:7px;
+         border-top:1px solid var(--rule);line-height:1.45}
+.co-plan .lbl{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--faint);
+              margin-right:6px}
+.co-tools{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.co-tools span{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--ice);
+               border:1px solid rgba(87,198,232,.3);border-radius:2px;padding:1px 5px}
+.predict{margin-top:10px;font-size:12px;color:var(--dim)}
+.predict b{color:var(--ink);font-family:var(--mono)}
+td.exp{font-family:var(--mono);font-size:10.5px;color:var(--dim);white-space:nowrap;width:92px}
+td.exp.miss{color:var(--flag)}
+.plan{display:block;color:var(--faint);font-size:11px;margin-top:2px}
 
 /* ---------- analytics ---------- */
 .grid{display:grid;grid-template-columns:1fr 300px;gap:12px;margin-top:12px}
@@ -155,6 +170,8 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
       </div>
       <div class="co-cmd" id="coCmd">Waiting for the agent…</div>
       <div class="co-why" id="coWhy"></div>
+      <div class="co-plan" id="coPlan" hidden><span class="lbl">AGENT PLAN</span><span id="coPlanTxt"></span>
+        <div class="co-tools" id="coTools"></div></div>
     </div>
   </section>
 
@@ -184,6 +201,7 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
         <span><i style="background:var(--flag)"></i>flagged for review</span>
         <span><i style="background:var(--block)"></i>blocked at the boundary</span>
       </div>
+      <div class="predict" id="predLine" hidden></div>
     </div>
 
     <div class="card">
@@ -204,7 +222,8 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
       <table>
         <thead><tr>
           <th style="width:34px">#</th><th style="width:200px">COMMAND</th>
-          <th style="width:82px">VERDICT</th><th style="width:118px">GATE</th><th>REASONING</th>
+          <th style="width:82px">VERDICT</th><th style="width:92px">AGENT EXPECTED</th>
+          <th style="width:118px">GATE</th><th>REASONING</th>
         </tr></thead>
         <tbody id="caseBody"></tbody>
       </table>
@@ -408,14 +427,27 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
 
   function listen(){
     const es = new EventSource("/stream");
-    es.onmessage = e => render(JSON.parse(e.data));
+    es.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "thinking") return thinking();
+      render(msg);
+    };
     es.onerror = () => { $("caseNote").textContent = "stream lost"; };
+  }
+
+  function escapeHtml(t){
+    return String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   }
 
   function argOf(v){
     if (v === null || v === undefined || typeof v === "boolean") return "";
     if (typeof v === "object") return " " + (v.waypoint_id ?? "");
     return " " + v;
+  }
+
+  function thinking(){
+    const el = $("coVerdict");
+    el.textContent = "DELIBERATING"; el.className = "co-verdict deliberating";
   }
 
   function render(f){
@@ -434,6 +466,14 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
       ? "Cancels radio silence. That needs operator authority."
       : (WHY[f.failure_mode] || "");
     $("callout").className = "callout " + v;
+    const d = f.decision || {};
+    const hasPlan = d.source === "claude" && d.plan;
+    $("coPlan").hidden = !hasPlan;
+    if (hasPlan) {
+      $("coPlanTxt").textContent = d.plan;
+      $("coTools").innerHTML = (d.tools || []).map(t => `<span>${t.replace(/_/g, " ")}</span>`).join("")
+        + (d.expected ? `<span style="color:var(--dim);border-color:var(--rule)">expected ${LABEL[d.expected]}</span>` : "");
+    }
     $("cLat").textContent = f.latency_ms.toFixed(0) + " ms";
     $("ovCount").textContent = `${f.scoreboard.blocked} BLOCKED · ${f.scoreboard.escaped} ESCAPED`;
 
@@ -457,6 +497,9 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
     $("barPass").style.width = (s.allowed / tot * 100) + "%";
     $("barFlag").style.width = (s.flagged / tot * 100) + "%";
     $("barBlock").style.width = (s.blocked / tot * 100) + "%";
+    $("predLine").hidden = !s.predicted;
+    if (s.predicted) $("predLine").innerHTML =
+      `Agent predicted the sandbox correctly <b>${s.predicted_right}/${s.predicted}</b> times.`;
 
     const gate = f.checks.doctrine_fired ? "Rule" : f.checks.behaviour_fired ? "Behaviour" : "—";
     const reason = f.authority_breach
@@ -468,9 +511,11 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
       `<td class="step">${f.step}</td>`
       + `<td class="cmd">${(SAYS[f.request.command] || f.request.command) + argOf(f.request.value)}</td>`
       + `<td class="verdict ${v}">${f.escaped ? '<span class="esc">ESCAPED</span>' : LABEL[v]}</td>`
+      + `<td class="exp ${d.expected && d.expected !== v ? "miss" : ""}">${d.expected ? LABEL[d.expected] : "—"}</td>`
       + `<td class="gate">${f.checks.doctrine_fired ? (f.checks.doctrine || "Rule") : gate}</td>`
       + `<td class="why">${reason} <span style="color:var(--faint)">`
-      + `risk ${f.risk.toFixed(2)} · ${f.latency_ms.toFixed(0)}ms</span></td>`;
+      + `risk ${f.risk.toFixed(2)} · ${f.latency_ms.toFixed(0)}ms</span>`
+      + (hasPlan ? `<span class="plan">Agent: ${escapeHtml(d.plan)}</span>` : "") + `</td>`;
     const body = $("caseBody");
     body.prepend(tr);
     while (body.childElementCount > 80) body.lastElementChild.remove();

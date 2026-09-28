@@ -1,10 +1,8 @@
-data/raw/
-data/processed/
-*.duckdb
-*.parquet
+# Python
+.venv/
 __pycache__/
-.pytest_cache/
 *.pyc
+.pytest_cache/
 
 # Local credentials -- never commit
 .env

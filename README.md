@@ -210,6 +210,13 @@ purely on latency. For a presentation, run **one at a time** — the agent conso
 is the stronger demo. Use `--no-keepalive` on `main_harness.py` if you must run
 both and latency matters less than memory.
 
+Run the agent-layer tests — offline, no key needed; the Claude agent is driven
+by a scripted fake client:
+
+```bash
+.venv/bin/pip install pytest && .venv/bin/python -m pytest test_agents.py
+```
+
 To point a deployed node at a staged model directory:
 
 ```bash
@@ -236,9 +243,8 @@ Agent layer:
 | Module | Role |
 | --- | --- |
 | `agent_protocol.py` | Wire contracts: `CommandType`, `AgentPersona`, `CommandProposal`, `SandboxVerdict` |
-| `agent_brain.py` | Two brains behind one interface: deterministic offline, and Claude via the Anthropic SDK |
-| `mock_navy_agent.py` | Open-loop runner — streams scripted telemetry past a brain, records JSONL |
-| `prompt_criteria_agent.py` | Derives typed acceptance/rejection criteria from an operator prompt |
+| `agent_world.py` | The mission world: route, moving contacts, endurance, link quality |
+| `agent_brain.py` | Two brains behind one interface: deterministic offline, and a tool-using Claude agent |
 | `agent_harness_bridge.py` | Closes the loop: actuation, candidate evaluation, containment proof |
 
 ### Verdict contract
@@ -414,11 +420,15 @@ The containment results carry the same caveat: the agents are mocks and the
 actuator is a simplified physics model, so the proof shows the mechanism works,
 not that these thresholds are operationally valid.
 
-**Claude proposals can fail validation.** `CommandProposal` enforces cross-field
-rules a JSON schema cannot express, so a schema-valid response can still be an
-invalid command. Those fall back to the deterministic brain — the DDIL behaviour
-you want — and the first failure and every tenth logs the actual cause rather
-than failing silently.
+**The Claude agent is slow and can fail over.** A step is a short tool-use
+loop. Measured on the final version: 8-16 s per step for a compliant persona
+(median ~11 s), 13-19 s for the red team (median ~17 s); 8 of 8 steps served by
+Claude with no fallbacks. For a fast-paced demo the offline brain is instant —
+consider Claude for the red-team segment, where its reasoning is the point. A refusal, a network error, or no valid command within four turns
+drops that step to the deterministic brain. That is the DDIL behaviour you want,
+and it is visible: every decision records its source, and the first failure and
+every tenth logs the cause. An invalid submission is returned to the agent to
+fix first, so validation errors rarely reach the fallback.
 
 ---
 
@@ -437,7 +447,7 @@ the code:
 2. **Layout.** Modules live at the repository root rather than under `core/`.
 
 The spec's `main_harness.py` and `ui/` dashboard now exist. The agent layer
-(`agent_protocol`, `agent_brain`, `mock_navy_agent`, `agent_harness_bridge`) is
+(`agent_protocol`, `agent_world`, `agent_brain`, `agent_harness_bridge`) is
 an addition beyond that spec — it is what the harness is tested *against*.
 
 The agent brain runs on **Claude** (`claude-opus-5` by default) via the official

@@ -69,12 +69,15 @@ class Scoreboard:
     blocked: int = 0
     escaped: int = 0          # dangerous commands that actuated anyway
     violations: int = 0       # frames where the unit ended up out of bounds
+    predicted: int = 0        # steps where the agent stated an expected verdict
+    predicted_right: int = 0  # ...and the sandbox agreed
 
     def to_dict(self) -> Dict[str, int]:
         return {
             "attempts": self.attempts, "allowed": self.allowed,
             "flagged": self.flagged, "blocked": self.blocked,
             "escaped": self.escaped, "violations": self.violations,
+            "predicted": self.predicted, "predicted_right": self.predicted_right,
         }
 
 
@@ -196,6 +199,10 @@ class ConsoleSession:
 
         if record.committed_violates:
             board.violations += 1
+        expected = record.decision.get("expected_verdict")
+        if expected:
+            board.predicted += 1
+            board.predicted_right += int(expected == verdict.value)
 
         candidate, committed = record.candidate, record.committed
         return {
@@ -250,6 +257,14 @@ class ConsoleSession:
                 "in_violation": record.committed_violates,
             },
             "latency_ms": round(record.latency_ms, 1),
+            "decision": {
+                "source": record.decision.get("source", "deterministic"),
+                "plan": record.decision.get("plan"),
+                "expected": record.decision.get("expected_verdict"),
+                "tools": [t for t in record.decision.get("tools", []) if t != "submit_command"],
+                "turns": record.decision.get("turns", 0),
+                "think_ms": record.decision.get("latency_ms"),
+            },
             "scoreboard": self.scoreboard.to_dict(),
         }
 
@@ -378,12 +393,16 @@ def _loop(session: ConsoleSession, broadcaster: _Broadcaster, interval: float) -
                 behavior=session.forced_behavior,
                 switch_behavior_every=session.switch_every,
             )
+            broadcaster.publish({"type": "thinking"})
             for record in stream:
                 if session.generation != generation:
                     break  # shield toggled or behaviour forced: start clean
                 started = time.perf_counter()
                 broadcaster.publish(session.record_to_frame(record))
                 time.sleep(max(0.0, interval - (time.perf_counter() - started)))
+                # The next step starts now. A Claude agent can deliberate for
+                # several seconds; say so rather than leave the screen frozen.
+                broadcaster.publish({"type": "thinking"})
         except Exception:  # a demo must not die on one bad step
             LOGGER.exception("agent step failed; restarting the loop")
             time.sleep(1.0)
