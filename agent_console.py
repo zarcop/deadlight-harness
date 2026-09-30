@@ -41,6 +41,7 @@ from agent_harness_bridge import (
     boot_harness,
 )
 from agent_protocol import SandboxVerdict
+from scenarios import SCENARIOS
 from tactical_telemetry import (
     CORRIDOR_HAZARD_M,
     CORRIDOR_WARNING_M,
@@ -108,6 +109,7 @@ class ConsoleSession:
         self.scoreboard = Scoreboard()
         self.boot_seconds = time.perf_counter() - started
         self._forced: Optional[BehaviorClass] = None
+        self._scenario: Optional[str] = None
         self._generation = 0   # bumped to restart the loop with fresh state
         self._lock = threading.Lock()
         LOGGER.info("Console ready in %.1fs", self.boot_seconds)
@@ -146,6 +148,19 @@ class ConsoleSession:
             return False
         return True
 
+    def set_scenario(self, key: Optional[str]) -> bool:
+        if key and key not in SCENARIOS:
+            return False
+        with self._lock:
+            self._scenario = key or None
+            self._generation += 1
+            self.scoreboard = Scoreboard()
+        return True
+
+    def new_scenario(self):
+        """A fresh scenario instance for one run, or None for open patrol."""
+        return SCENARIOS[self._scenario]() if self._scenario else None
+
     @property
     def forced_behavior(self) -> Optional[BehaviorClass]:
         return self._forced
@@ -169,6 +184,9 @@ class ConsoleSession:
             "boot_seconds": round(self.boot_seconds, 1),
             "behaviors": [b.value for b in BehaviorClass],
             "forced_behavior": self._forced.value if self._forced else None,
+            "scenario": self._scenario,
+            "scenarios": [{"key": c.key, "title": c.title, "summary": c.summary,
+                           "expectation": c.expectation} for c in SCENARIOS.values()],
             "thresholds": {
                 "corridor_warning_m": CORRIDOR_WARNING_M,
                 "corridor_hazard_m": CORRIDOR_HAZARD_M,
@@ -257,6 +275,8 @@ class ConsoleSession:
                 "in_violation": record.committed_violates,
             },
             "latency_ms": round(record.latency_ms, 1),
+            "scenario": self._scenario,
+            "radio": record.radio,
             "decision": {
                 "source": record.decision.get("source", "deterministic"),
                 "plan": record.decision.get("plan"),
@@ -351,6 +371,10 @@ def _make_handler(session: ConsoleSession, broadcaster: _Broadcaster):
             elif action == "reset":
                 session.reset()
                 self._json({"ok": True})
+            elif action == "scenario":
+                value = body.get("value") or None
+                ok = session.set_scenario(value)
+                self._json({"ok": ok, "scenario": value}, 200 if ok else 400)
             elif action == "behavior":
                 value = body.get("value") or None
                 ok = session.set_behavior(value)
@@ -392,6 +416,7 @@ def _loop(session: ConsoleSession, broadcaster: _Broadcaster, interval: float) -
                 None,
                 behavior=session.forced_behavior,
                 switch_behavior_every=session.switch_every,
+                scenario=session.new_scenario(),
             )
             broadcaster.publish({"type": "thinking"})
             for record in stream:
@@ -419,6 +444,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--baseline", type=int, default=220)
     parser.add_argument("--switch-every", type=int, default=7)
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--scenario", choices=sorted(SCENARIOS),
+                        help="start in a scripted scenario (switchable in the UI)")
     parser.add_argument("--start-unguarded", action="store_true",
                         help="open with the shield down (the agent escapes immediately)")
     parser.add_argument("--verbose", action="store_true")
@@ -434,6 +461,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         baseline=args.baseline, switch_every=args.switch_every,
         guarded=not args.start_unguarded,
     )
+    if args.scenario:
+        session.set_scenario(args.scenario)
     broadcaster = _Broadcaster()
     threading.Thread(
         target=_loop, args=(session, broadcaster, args.interval), daemon=True

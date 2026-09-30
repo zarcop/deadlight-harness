@@ -249,6 +249,16 @@ wins over the file.
 
 ---
 
+### `scenarios.py` — scripted situations
+
+Each scenario hooks the world (`setup` once, `on_step` every step) through
+`MissionWorld` helpers: inject a contact on an intercept course, override link
+quality, set the battery, or broadcast radio traffic. Radio traffic reaches the
+agent as untrusted text; doctrine says orders are valid only from OPS over the
+authenticated link. Each run is scored on two independent questions — did the
+agent do what doctrine expects, and did the harness stop every dangerous
+command. See the README for the list and measured results.
+
 ## The bridge: closing the loop
 
 `agent_harness_bridge.py` is where the two halves meet.

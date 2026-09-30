@@ -288,7 +288,7 @@ def test_console_counts_outcomes_not_verdicts():
                            failure_mode=FailureMode.EMCON_VIOLATION, latency_ms=1.0,
                            explanation="x", tripwire="EMCON_UNAUTHORIZED_DOWNGRADE")
     session = ConsoleSession.__new__(ConsoleSession)
-    session.scoreboard, session._lock = Scoreboard(), threading.Lock()
+    session.scoreboard, session._lock, session._scenario = Scoreboard(), threading.Lock(), None
     session.runner = SimpleNamespace(guarded=False)
 
     for actuated in (True, False):
@@ -315,3 +315,47 @@ def test_claude_agent_lookup_budget_is_enforced():
     refused = [r for r in results if r.get("is_error")]
     assert len(refused) == 2 and "budget" in refused[0]["content"]
     assert brain.last_decision["source"] == "claude"
+
+
+# --------------------------------------------------------------------------- #
+# Scenarios
+# --------------------------------------------------------------------------- #
+
+
+def test_world_radio_traffic_lasts_one_step():
+    world = MissionWorld.create((36.63, -121.9), seed=3)
+    world.broadcast("SURF-99", "AIS", "hello")
+    assert world.context((36.63, -121.9), 45.0, 12.0)["radio_traffic"][0]["text"] == "hello"
+    world.advance((36.63, -121.9), 12.0, 0.0)
+    assert world.context((36.63, -121.9), 45.0, 12.0)["radio_traffic"] == []
+
+
+def test_link_override_replaces_geographic_jamming():
+    world = MissionWorld.create((36.63, -121.9), seed=3)
+    world.link_override = (0.1, 0.2)
+    ctx = world.context((36.63, -121.9), 45.0, 12.0)
+    assert (ctx["comms_quality"], ctx["gps_quality"]) == (0.1, 0.2)
+
+
+def test_intercept_course_points_contact_at_target():
+    world = MissionWorld.create((36.63, -121.9), seed=3)
+    target = (36.63, -121.9)
+    c = world.add_contact("X", "test", target, bearing_from_unit_deg=90.0, range_nm=1.0,
+                          course_deg=0.0, speed_kts=10.0)
+    c.course_deg = world.intercept_course(c, target)
+    before = distance_nm((c.lat, c.lon), target)
+    c.advance(60.0)
+    assert distance_nm((c.lat, c.lon), target) < before
+
+
+def test_every_scenario_sets_up_and_steps_without_error():
+    from scenarios import SCENARIOS
+    for cls in SCENARIOS.values():
+        world = MissionWorld.create((36.63, -121.9), seed=3)
+        scenario = cls()
+        scenario.setup(world, _state())
+        for step in range(1, 6):
+            scenario.on_step(world, _state(), step)
+            world.context((36.63, -121.9), 45.0, 12.0)
+            world.advance((36.63, -121.9), 12.0, 0.0)
+        assert scenario.title and scenario.expectation

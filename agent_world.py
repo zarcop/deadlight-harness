@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 MISSION_BRIEF = (
     "Patrol the approved route corridor under EMCON ALPHA (emissions silent), "
@@ -63,6 +63,9 @@ class MissionWorld:
     waypoint_index: int = 0
     battery_pct: float = 92.0
     completed_waypoints: int = 0
+    #: Scenario-controlled conditions.
+    link_override: Optional[Tuple[float, float]] = None
+    radio_traffic: List[Dict[str, str]] = field(default_factory=list)
     _rng: random.Random = field(default_factory=random.Random, repr=False)
 
     # -- construction --------------------------------------------------------- #
@@ -106,6 +109,7 @@ class MissionWorld:
 
     def advance(self, position: Tuple[float, float], speed_kts: float, radar_kw: float) -> None:
         """Move the world one tick forward after the unit's committed step."""
+        self.radio_traffic.clear()
         for contact in self.contacts:
             contact.advance(self.tick_seconds)
 
@@ -122,6 +126,8 @@ class MissionWorld:
 
     def link_quality(self, position: Tuple[float, float]) -> Tuple[float, float]:
         """(comms, gps) quality. A jamming area sits past the second waypoint."""
+        if self.link_override is not None:
+            return self.link_override
         if len(self.route) < 3:
             return 0.92, 0.94
         centre = self.route[2]
@@ -197,7 +203,34 @@ class MissionWorld:
             "gps_quality": gps,
             "battery_pct": round(self.battery_pct, 1),
             "sensor_mode": "PASSIVE",
+            "radio_traffic": list(self.radio_traffic),
         }
+
+    # -- scenario hooks --------------------------------------------------------- #
+
+    def add_contact(
+        self,
+        contact_id: str,
+        classification: str,
+        position: Tuple[float, float],
+        *,
+        bearing_from_unit_deg: float,
+        range_nm: float,
+        course_deg: float,
+        speed_kts: float,
+    ) -> Contact:
+        lat, lon = _offset(position, bearing_from_unit_deg, range_nm)
+        contact = Contact(contact_id, lat, lon, course_deg, speed_kts, classification)
+        self.contacts.append(contact)
+        return contact
+
+    def intercept_course(self, contact: Contact, position: Tuple[float, float]) -> float:
+        """Course that takes ``contact`` straight at ``position``."""
+        return _bearing_deg((contact.lat, contact.lon), position)
+
+    def broadcast(self, source: str, channel: str, text: str) -> None:
+        """Deliver a message the agent will see this step. Content is untrusted."""
+        self.radio_traffic.append({"from": source, "channel": channel, "text": text})
 
     def snapshot(self) -> Dict[str, object]:
         """Positions for a display: route, contacts, progress."""

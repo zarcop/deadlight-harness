@@ -46,7 +46,19 @@ h1{font-family:var(--cond);font-weight:700;font-size:24px;letter-spacing:.07em;m
 @media (max-width:900px){#field{height:330px}}
 .overlay{position:absolute;pointer-events:none;font-family:var(--mono);font-size:10px;
          letter-spacing:.12em;color:var(--faint)}
-.ov-tl{top:12px;left:14px} .ov-tr{top:12px;right:14px;text-align:right}
+.ov-tl{top:12px;left:14px;max-width:22%;line-height:1.5}
+.ov-tl b{display:block;color:var(--ink);font-family:var(--cond);font-size:14px;letter-spacing:.06em}
+.ov-tl span{display:block;letter-spacing:.02em;text-transform:none;font-family:var(--sans);
+            font-size:11px;color:var(--dim)}
+select.scn{font-family:var(--cond);font-weight:600;font-size:12px;letter-spacing:.07em;
+  text-transform:uppercase;background:var(--panel);color:var(--ink);border:1px solid var(--rule);
+  border-radius:3px;padding:6px 9px;cursor:pointer}
+select.scn:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+.co-radio{margin-top:7px;padding:6px 8px;border-radius:3px;font-size:11.5px;line-height:1.4;
+  border:1px dashed rgba(232,169,61,.5);background:rgba(232,169,61,.07);color:var(--ink)}
+.co-radio .src{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--flag);
+  display:block;margin-bottom:2px}
+.ov-tl .ov-tr{top:12px;right:14px;text-align:right}
 .ov-bl{bottom:12px;left:14px} .ov-br{bottom:12px;right:14px;text-align:right}
 
 /* live call-out card, top-centre of arena */
@@ -147,6 +159,7 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
   <header>
     <h1>Agent Containment</h1>
     <div class="hspace">
+      <select class="scn" id="scn" aria-label="Scenario"><option value="">Open patrol</option></select>
       <span class="chip">AGENT <b id="cInf">—</b></span>
       <span class="chip">BASELINE <b id="cBase">—</b></span>
       <span class="chip">DECISION <b id="cLat">—</b></span>
@@ -158,7 +171,7 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
 
   <section class="arena">
     <canvas id="field"></canvas>
-    <div class="overlay ov-tl">AGENT</div>
+    <div class="overlay ov-tl" id="ovScn"><b>OPEN PATROL</b><span>Unscripted patrol.</span></div>
     <div class="overlay ov-tr">VESSEL</div>
     <div class="overlay ov-bl" id="ovGate">SANDBOX BOUNDARY</div>
     <div class="overlay ov-br" id="ovCount">—</div>
@@ -170,6 +183,7 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
       </div>
       <div class="co-cmd" id="coCmd">Waiting for the agent…</div>
       <div class="co-why" id="coWhy"></div>
+      <div class="co-radio" id="coRadio" hidden></div>
       <div class="co-plan" id="coPlan" hidden><span class="lbl">AGENT PLAN</span><span id="coPlanTxt"></span>
         <div class="co-tools" id="coTools"></div></div>
     </div>
@@ -260,7 +274,7 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
   const LABEL = {PERMIT:"ALLOWED", REVIEW:"FLAGGED", CONTAIN:"BLOCKED"};
   const COLOR = {PERMIT:"#3DD68C", REVIEW:"#E8A93D", CONTAIN:"#E8455F"};
 
-  let guarded = true, scene = null;
+  let guarded = true, scene = null, lastRadio = null, radioTtl = 0;
 
   // ---------- arena ----------
   const cv = $("field"), cx = cv.getContext("2d");
@@ -400,6 +414,15 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
     scene = await (await fetch("/scene")).json();
     $("cInf").textContent = scene.inference;
     $("cBase").textContent = scene.baseline;
+    const scn = $("scn");
+    scene.scenarios.forEach(x => scn.add(new Option(x.title, x.key)));
+    scn.value = scene.scenario || "";
+    showScenario(scene.scenario);
+    scn.addEventListener("change", async () => {
+      showScenario(scn.value);
+      await fetch("/control", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({action:"scenario", value: scn.value})});
+    });
     setShield(scene.guarded);
     fit(); draw(); listen();
   }
@@ -445,6 +468,14 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
     return " " + v;
   }
 
+  function showScenario(key){
+    const x = (scene.scenarios || []).find(y => y.key === key);
+    $("ovScn").innerHTML = x
+      ? `<b>${escapeHtml(x.title.toUpperCase())}</b><span>${escapeHtml(x.summary)}</span>`
+        + `<span style="color:var(--ice)">Expected: ${escapeHtml(x.expectation)}</span>`
+      : `<b>OPEN PATROL</b><span>Unscripted patrol.</span>`;
+  }
+
   function thinking(){
     const el = $("coVerdict");
     el.textContent = "DELIBERATING"; el.className = "co-verdict deliberating";
@@ -466,6 +497,12 @@ button.pick:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
       ? "Cancels radio silence. That needs operator authority."
       : (WHY[f.failure_mode] || "");
     $("callout").className = "callout " + v;
+    // Radio lingers a few steps so the audience can read it.
+    if ((f.radio || [])[0]) { lastRadio = f.radio[0]; radioTtl = 3; } else radioTtl--;
+    const radio = radioTtl > 0 ? lastRadio : null;
+    $("coRadio").hidden = !radio;
+    if (radio) $("coRadio").innerHTML =
+      `<span class="src">${escapeHtml(radio.channel)} · ${escapeHtml(radio.from)}</span>${escapeHtml(radio.text)}`;
     const d = f.decision || {};
     const hasPlan = d.source === "claude" && d.plan;
     $("coPlan").hidden = !hasPlan;

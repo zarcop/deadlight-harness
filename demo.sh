@@ -8,6 +8,7 @@
 #   ./demo.sh                 agent containment console (the one to film)
 #   ./demo.sh --harness       watchstander dashboard instead
 #   ./demo.sh --claude        drive the agent with Claude
+#   ./demo.sh --scenario AIS_SPOOF   start in a scripted scenario
 #   ./demo.sh --check         run preflight only, start nothing
 #
 set -euo pipefail
@@ -22,6 +23,7 @@ INTERVAL="2.2"
 PORT=""
 OPEN_BROWSER=1
 CHECK_ONLY=0
+SCENARIO=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     --port)      PORT="$2"; shift ;;
     --no-open)   OPEN_BROWSER=0 ;;
     --check)     CHECK_ONLY=1 ;;
+    --scenario)  SCENARIO="$2"; shift ;;
     -h|--help)   sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
@@ -123,7 +126,8 @@ fi
 LOG="$(mktemp -t navydemo)"
 if [[ "$TARGET" == "console" ]]; then
   APP="agent console"; URL="http://127.0.0.1:$PORT"
-  "$PY" -u agent_console.py --port "$PORT" --backend "$BACKEND" --interval "$INTERVAL" >"$LOG" 2>&1 &
+  "$PY" -u agent_console.py --port "$PORT" --backend "$BACKEND" --interval "$INTERVAL" \
+    ${SCENARIO:+--scenario "$SCENARIO"} >"$LOG" 2>&1 &
   READY="console  :"
 else
   APP="watchstander dashboard"; URL="http://127.0.0.1:$PORT"
