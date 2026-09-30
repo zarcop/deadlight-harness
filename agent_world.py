@@ -1,19 +1,4 @@
-"""The mission world an agent operates in.
-
-Telemetry says what the vessel is doing. This module says what is around it:
-the route it has been tasked to follow, the surface contacts sharing the water,
-its remaining endurance, and the quality of its links.
-
-The world is persistent and causal. Contacts keep their identity and move on
-their own courses; waypoints are fixed positions the unit must actually reach;
-battery drains with the speed the agent commands and the emitters it switches
-on. An agent that steers toward a waypoint sees the distance close. That is the
-minimum an agent needs to reason about consequences -- a world that reshuffles
-itself every step can only be reacted to, never planned against.
-"""
-
 from __future__ import annotations
-
 import math
 import random
 from dataclasses import dataclass, field

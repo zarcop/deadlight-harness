@@ -1,10 +1,3 @@
-"""Tests for the agent layer: protocol, both brains, the mission world, and the
-bridge pieces that do not need an embedding model.
-
-The Claude agent is exercised against a scripted fake client, so these run
-offline, deterministically, and without spending tokens.
-"""
-
 import json
 import threading
 from types import SimpleNamespace
